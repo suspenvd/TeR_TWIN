@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ter-twin"
+version = "0.1.0"
+description = "TeR-Twin: Suite de dinamica vehicular, correlacion y telemetria en tiempo real para Formula Student"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Tecnun eRacing", email = "eracing@tecnun.es" }
+]
+dependencies = [
+    "jax>=0.4.20",
+    "jaxlib>=0.4.20",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0",
+    "cantools>=39.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-xdist>=3.3.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+realtime = [
+    "websockets>=11.0",
+    "pyserial>=3.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+strict = false

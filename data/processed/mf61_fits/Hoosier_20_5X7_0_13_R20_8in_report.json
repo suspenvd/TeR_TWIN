@@ -1,0 +1,209 @@
+{
+  "slug": "Hoosier_20_5X7_0_13_R20_8in",
+  "info": {
+    "signs": {
+      "fy": -1.0,
+      "mz": -1.0,
+      "fx": 1.0,
+      "ia": 1.0
+    },
+    "n_runs": {
+      "lateral": 2
+    },
+    "n_points": 6000,
+    "n_val": 0
+  },
+  "ident": {
+    "fz2": true,
+    "fz3": true,
+    "gamma": true,
+    "p": true,
+    "_levels": {
+      "fz": 7,
+      "gamma": 3,
+      "p": 5
+    }
+  },
+  "stages": {
+    "fy_pure": {
+      "status": "ok",
+      "free": [
+        "pCy1",
+        "pDy1",
+        "pDy2",
+        "pDy3",
+        "pEy1",
+        "pEy2",
+        "pEy3",
+        "pEy4",
+        "pEy5",
+        "pKy1",
+        "pKy2",
+        "pKy3",
+        "pKy4",
+        "pKy5",
+        "pKy6",
+        "pKy7",
+        "pHy1",
+        "pHy2",
+        "pVy1",
+        "pVy2",
+        "pVy3",
+        "pVy4",
+        "ppy1",
+        "ppy2",
+        "ppy3",
+        "ppy4",
+        "ppy5"
+      ],
+      "cost": 1.0876326785461332,
+      "nfev": 24,
+      "message": "`ftol` termination condition is satisfied.",
+      "seconds": 8.01,
+      "train": {
+        "n": 6000,
+        "rmse": 73.76996165757664,
+        "nmae": 0.008054970664055404,
+        "r2": 0.9984633549912342
+      },
+      "val": null,
+      "at_bounds": [
+        "pEy3",
+        "pEy4",
+        "pEy5",
+        "pKy5"
+      ]
+    },
+    "fx_pure": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "mz_pure": {
+      "status": "ok",
+      "free": [
+        "qBz1",
+        "qBz2",
+        "qBz3",
+        "qBz4",
+        "qBz5",
+        "qBz9",
+        "qBz10",
+        "qCz1",
+        "qDz1",
+        "qDz2",
+        "qDz3",
+        "qDz4",
+        "qDz6",
+        "qDz7",
+        "qDz8",
+        "qDz9",
+        "qDz10",
+        "qDz11",
+        "qEz1",
+        "qEz2",
+        "qEz3",
+        "qEz4",
+        "qEz5",
+        "qHz1",
+        "qHz2",
+        "qHz3",
+        "qHz4",
+        "ppz1",
+        "ppz2"
+      ],
+      "cost": 12.252576664469668,
+      "nfev": 200,
+      "message": "The maximum number of function evaluations is exceeded.",
+      "seconds": 57.46,
+      "train": {
+        "n": 6000,
+        "rmse": 8.82195220958392,
+        "nmae": 0.0371530446605398,
+        "r2": 0.9167505517157843
+      },
+      "val": null,
+      "at_bounds": [
+        "qDz8",
+        "qDz10",
+        "qDz11",
+        "qEz5",
+        "qHz1",
+        "qHz4"
+      ]
+    },
+    "fx_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "fy_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "mz_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    }
+  },
+  "runs": [
+    {
+      "file": "B2356run19.dat",
+      "kind": "transient",
+      "pressure_sweep": false,
+      "n": 684.0,
+      "dt": 0.01,
+      "duration_s": 6.84,
+      "sa_amp_deg": 0.016,
+      "sl_amp": 0.0254,
+      "sa_rate_degs": 0.0675,
+      "sl_rate": 0.1356,
+      "n_fz_levels": 5.0,
+      "n_p_levels": 2.0,
+      "p_span_kpa": 1.01,
+      "n_ia_levels": 3.0,
+      "fz_med": 636.505,
+      "p_med": 82.41,
+      "ia_med_deg": 1.996,
+      "v_med": 11.1528
+    },
+    {
+      "file": "B2356run20.dat",
+      "kind": "lateral",
+      "pressure_sweep": true,
+      "n": 61026.0,
+      "dt": 0.01,
+      "duration_s": 610.26,
+      "sa_amp_deg": 12.198,
+      "sl_amp": 0.0443,
+      "sa_rate_degs": 4.16,
+      "sl_rate": 0.0158,
+      "n_fz_levels": 15.0,
+      "n_p_levels": 5.0,
+      "p_span_kpa": 32.01,
+      "n_ia_levels": 3.0,
+      "fz_med": 680.76,
+      "p_med": 82.46,
+      "ia_med_deg": 1.993,
+      "v_med": 11.1556
+    },
+    {
+      "file": "B2356run21.dat",
+      "kind": "lateral",
+      "pressure_sweep": true,
+      "n": 52306.0,
+      "dt": 0.01,
+      "duration_s": 523.06,
+      "sa_amp_deg": 12.198,
+      "sl_amp": 0.0537,
+      "sa_rate_degs": 4.16,
+      "sl_rate": 0.0175,
+      "n_fz_levels": 16.0,
+      "n_p_levels": 4.0,
+      "p_span_kpa": 33.63,
+      "n_ia_levels": 3.0,
+      "fz_med": 671.555,
+      "p_med": 82.26,
+      "ia_med_deg": 0.016,
+      "v_med": 11.1556
+    }
+  ]
+}

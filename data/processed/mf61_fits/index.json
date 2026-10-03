@@ -1,0 +1,538 @@
+{
+  "version": 1,
+  "tires": [
+    {
+      "slug": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_6in",
+      "tire_name": "Goodyear 18.0X6.5-10, Eagle Racing Special",
+      "rim_width_in": 6.0,
+      "files": [
+        "B2356run33.dat",
+        "B2356run34.dat",
+        "B2356run35.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_6in.yaml",
+      "data": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_6in_data.npz",
+      "report": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_6in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.31,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 569.0327204739234,
+        "mu_y_peak": 2.578746702542536,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1740.6540242162118,
+        "mz_peak_Nm": 28.933771534671624,
+        "trail0_mm": 27.05805797957145,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9980857807738687,
+        "fx_pure": null,
+        "mz_pure": 0.9090410579637445,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_7in",
+      "tire_name": "Goodyear 18.0X6.5-10, Eagle Racing Special",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run36.dat",
+        "B2356run37.dat",
+        "B2356run38.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_7in.yaml",
+      "data": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_7in_data.npz",
+      "report": "Goodyear_18_0X6_5_10_Eagle_Racing_Special_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.26,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 619.9404226827903,
+        "mu_y_peak": 2.5696209458190795,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1734.4941384278786,
+        "mz_peak_Nm": 24.277036530595083,
+        "trail0_mm": 20.05742517962097,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9981338154772338,
+        "fx_pure": null,
+        "mz_pure": 0.8930580038447203,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Goodyear_20_0X7_0_13_2704_7in",
+      "tire_name": "Goodyear 20.0X7.0-13, 2704",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run22.dat",
+        "B2356run23.dat",
+        "B2356run24.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Goodyear_20_0X7_0_13_2704_7in.yaml",
+      "data": "Goodyear_20_0X7_0_13_2704_7in_data.npz",
+      "report": "Goodyear_20_0X7_0_13_2704_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.31,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 694.3277478146613,
+        "mu_y_peak": 2.8546228473751905,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1926.8704219782535,
+        "mz_peak_Nm": 27.893777654524428,
+        "trail0_mm": 21.76024969126912,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.996829264541215,
+        "fx_pure": null,
+        "mz_pure": 0.9432622511460899,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Goodyear_20_0X7_0_13_2704_8in",
+      "tire_name": "Goodyear 20.0X7.0-13, 2704",
+      "rim_width_in": 8.0,
+      "files": [
+        "B2356run25.dat",
+        "B2356run46.dat",
+        "B2356run49.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Goodyear_20_0X7_0_13_2704_8in.yaml",
+      "data": "Goodyear_20_0X7_0_13_2704_8in_data.npz",
+      "report": "Goodyear_20_0X7_0_13_2704_8in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.71,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 606.0046746941242,
+        "mu_y_peak": 2.536352753607039,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1712.0381086847513,
+        "mz_peak_Nm": 22.77764049386177,
+        "trail0_mm": 21.41475107565094,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9979346109157516,
+        "fx_pure": null,
+        "mz_pure": 0.9239990581226463,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_16_0X6_0_10_R20_C2000_6in",
+      "tire_name": "Hoosier 16.0X6.0-10, R20, C2000",
+      "rim_width_in": 6.0,
+      "files": [
+        "B2356run10.dat",
+        "B2356run11.dat",
+        "B2356run12.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_16_0X6_0_10_R20_C2000_6in.yaml",
+      "data": "Hoosier_16_0X6_0_10_R20_C2000_6in_data.npz",
+      "report": "Hoosier_16_0X6_0_10_R20_C2000_6in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.36,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 396.74744884767006,
+        "mu_y_peak": 2.4298551924912717,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1640.1522549316085,
+        "mz_peak_Nm": 26.39040758543406,
+        "trail0_mm": 29.117408434715518,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9982781496580256,
+        "fx_pure": null,
+        "mz_pure": 0.9231869624855294,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_16_0X6_0_10_R20_C2000_7in",
+      "tire_name": "Hoosier 16.0X6.0-10, R20, C2000",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run13.dat",
+        "B2356run14.dat",
+        "B2356run15.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_16_0X6_0_10_R20_C2000_7in.yaml",
+      "data": "Hoosier_16_0X6_0_10_R20_C2000_7in_data.npz",
+      "report": "Hoosier_16_0X6_0_10_R20_C2000_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.26,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 414.93636230604903,
+        "mu_y_peak": 2.3769285293241507,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1604.4267572938018,
+        "mz_peak_Nm": 26.038436598291852,
+        "trail0_mm": 29.524978382371085,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9985897432750321,
+        "fx_pure": null,
+        "mz_pure": 0.9071905458353764,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_16_0X7_5_10_R20_C2000_7in",
+      "tire_name": "Hoosier 16.0X7.5-10, R20, C2000",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run2.dat",
+        "B2356run4.dat",
+        "B2356run5.dat",
+        "B2356run6.dat"
+      ],
+      "kinds": {
+        "lateral": 3,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_16_0X7_5_10_R20_C2000_7in.yaml",
+      "data": "Hoosier_16_0X7_5_10_R20_C2000_7in_data.npz",
+      "report": "Hoosier_16_0X7_5_10_R20_C2000_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.41,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 481.9582516760171,
+        "mu_y_peak": 2.4641244528707618,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1663.2840056877642,
+        "mz_peak_Nm": 30.241197479392206,
+        "trail0_mm": 33.779552342041065,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9980413286241053,
+        "fx_pure": null,
+        "mz_pure": 0.9218642826262795,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_16_0X7_5_10_R20_C2000_8in",
+      "tire_name": "Hoosier 16.0X7.5-10, R20, C2000",
+      "rim_width_in": 8.0,
+      "files": [
+        "B2356run7.dat",
+        "B2356run8.dat",
+        "B2356run9.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_16_0X7_5_10_R20_C2000_8in.yaml",
+      "data": "Hoosier_16_0X7_5_10_R20_C2000_8in_data.npz",
+      "report": "Hoosier_16_0X7_5_10_R20_C2000_8in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.46,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 476.3478996946691,
+        "mu_y_peak": 2.454544860597733,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1656.8177809034696,
+        "mz_peak_Nm": 26.89163347855169,
+        "trail0_mm": 30.466258912490453,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9985242481507333,
+        "fx_pure": null,
+        "mz_pure": 0.9164105121077029,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_18_0X6_0_10_R20_6in",
+      "tire_name": "Hoosier 18.0X6.0-10, R20",
+      "rim_width_in": 6.0,
+      "files": [
+        "B2356run27.dat",
+        "B2356run28.dat",
+        "B2356run29.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_18_0X6_0_10_R20_6in.yaml",
+      "data": "Hoosier_18_0X6_0_10_R20_6in_data.npz",
+      "report": "Hoosier_18_0X6_0_10_R20_6in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.0,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 473.16555055609746,
+        "mu_y_peak": 2.711326837298903,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1830.1456151767595,
+        "mz_peak_Nm": 29.99171152139818,
+        "trail0_mm": 31.64293051037744,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9979503316361606,
+        "fx_pure": null,
+        "mz_pure": 0.917251958645492,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_18_0X6_0_10_R20_7in",
+      "tire_name": "Hoosier 18.0X6.0-10, R20",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run30.dat",
+        "B2356run31.dat",
+        "B2356run32.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_18_0X6_0_10_R20_7in.yaml",
+      "data": "Hoosier_18_0X6_0_10_R20_7in_data.npz",
+      "report": "Hoosier_18_0X6_0_10_R20_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 81.95,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 510.24329345071135,
+        "mu_y_peak": 2.746882679733749,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1854.1458088202805,
+        "mz_peak_Nm": 27.569201344003112,
+        "trail0_mm": 25.25101299573987,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9982353495934219,
+        "fx_pure": null,
+        "mz_pure": 0.921255233874612,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_20_5X7_0_13_R20_7in",
+      "tire_name": "Hoosier 20.5X7.0-13, R20",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run16.dat",
+        "B2356run17.dat",
+        "B2356run18.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_20_5X7_0_13_R20_7in.yaml",
+      "data": "Hoosier_20_5X7_0_13_R20_7in_data.npz",
+      "report": "Hoosier_20_5X7_0_13_R20_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.41,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 640.9289931556909,
+        "mu_y_peak": 2.463957175404992,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1663.1710933983697,
+        "mz_peak_Nm": 23.18878247577156,
+        "trail0_mm": 22.19633050246884,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9981301266099759,
+        "fx_pure": null,
+        "mz_pure": 0.9133845279991493,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "Hoosier_20_5X7_0_13_R20_8in",
+      "tire_name": "Hoosier 20.5X7.0-13, R20",
+      "rim_width_in": 8.0,
+      "files": [
+        "B2356run19.dat",
+        "B2356run20.dat",
+        "B2356run21.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "Hoosier_20_5X7_0_13_R20_8in.yaml",
+      "data": "Hoosier_20_5X7_0_13_R20_8in_data.npz",
+      "report": "Hoosier_20_5X7_0_13_R20_8in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.36,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 648.9131239106435,
+        "mu_y_peak": 2.466595360539123,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1664.951868363908,
+        "mz_peak_Nm": 22.497991653794532,
+        "trail0_mm": 21.882683251834727,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9984633549912342,
+        "fx_pure": null,
+        "mz_pure": 0.9167505517157843,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "MRF_18_0X6_0_10_ZTD1_6in",
+      "tire_name": "MRF 18.0X6.0-10, ZTD1",
+      "rim_width_in": 6.0,
+      "files": [
+        "B2356run39.dat",
+        "B2356run40.dat",
+        "B2356run41.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "MRF_18_0X6_0_10_ZTD1_6in.yaml",
+      "data": "MRF_18_0X6_0_10_ZTD1_6in_data.npz",
+      "report": "MRF_18_0X6_0_10_ZTD1_6in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.31,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 634.4411376220532,
+        "mu_y_peak": 1.9082997851827332,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1288.102354998345,
+        "mz_peak_Nm": 17.443000307954733,
+        "trail0_mm": 27.247231983726852,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9983349249831299,
+        "fx_pure": null,
+        "mz_pure": 0.7895434256026768,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    },
+    {
+      "slug": "MRF_18_0X6_0_10_ZTD1_7in",
+      "tire_name": "MRF 18.0X6.0-10, ZTD1",
+      "rim_width_in": 7.0,
+      "files": [
+        "B2356run42.dat",
+        "B2356run43.dat",
+        "B2356run44.dat"
+      ],
+      "kinds": {
+        "lateral": 2,
+        "transient": 1
+      },
+      "status": "ok",
+      "params": "MRF_18_0X6_0_10_ZTD1_7in.yaml",
+      "data": "MRF_18_0X6_0_10_ZTD1_7in_data.npz",
+      "report": "MRF_18_0X6_0_10_ZTD1_7in_report.json",
+      "fnomin": 675.0,
+      "nompres": 82.51,
+      "summary": {
+        "fz": 675.0,
+        "c_alpha_N_deg": 653.3147208141016,
+        "mu_y_peak": 1.8849999720387924,
+        "mu_x_peak": 2.1999968761282513,
+        "fy_peak_N": 1272.3749811261848,
+        "mz_peak_Nm": 15.348810167684672,
+        "trail0_mm": 24.419283395024216,
+        "c_kappa_N": 20250.0
+      },
+      "r2": {
+        "fy_pure": 0.9992043276276084,
+        "fx_pure": null,
+        "mz_pure": 0.7703936755943473,
+        "fx_comb": null,
+        "fy_comb": null,
+        "mz_comb": null
+      }
+    }
+  ]
+}

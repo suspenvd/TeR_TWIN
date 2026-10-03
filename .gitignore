@@ -11,6 +11,8 @@ dist/
 *.egg-info/
 .installed.cfg
 *.egg
+*.csv
+*.dat
 
 .pytest_cache/
 .mypy_cache/
@@ -19,6 +21,7 @@ dist/
 htmlcov/
 
 data/raw/ttc/*.mat
+data/raw/ttc/RunData_Cornering_ASCII_SI_Round9/*.dat
 data/raw/telemetry/*.mf4
 data/raw/telemetry/*.log
 data/raw/telemetry/*.bin

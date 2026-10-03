@@ -1,0 +1,207 @@
+{
+  "slug": "Hoosier_16_0X6_0_10_R20_C2000_7in",
+  "info": {
+    "signs": {
+      "fy": -1.0,
+      "mz": -1.0,
+      "fx": 1.0,
+      "ia": 1.0
+    },
+    "n_runs": {
+      "lateral": 2
+    },
+    "n_points": 6000,
+    "n_val": 0
+  },
+  "ident": {
+    "fz2": true,
+    "fz3": true,
+    "gamma": true,
+    "p": true,
+    "_levels": {
+      "fz": 6,
+      "gamma": 3,
+      "p": 5
+    }
+  },
+  "stages": {
+    "fy_pure": {
+      "status": "ok",
+      "free": [
+        "pCy1",
+        "pDy1",
+        "pDy2",
+        "pDy3",
+        "pEy1",
+        "pEy2",
+        "pEy3",
+        "pEy4",
+        "pEy5",
+        "pKy1",
+        "pKy2",
+        "pKy3",
+        "pKy4",
+        "pKy5",
+        "pKy6",
+        "pKy7",
+        "pHy1",
+        "pHy2",
+        "pVy1",
+        "pVy2",
+        "pVy3",
+        "pVy4",
+        "ppy1",
+        "ppy2",
+        "ppy3",
+        "ppy4",
+        "ppy5"
+      ],
+      "cost": 1.1026715510003335,
+      "nfev": 200,
+      "message": "The maximum number of function evaluations is exceeded.",
+      "seconds": 63.51,
+      "train": {
+        "n": 6000,
+        "rmse": 53.2485268969496,
+        "nmae": 0.008276398739332908,
+        "r2": 0.9985897432750321
+      },
+      "val": null,
+      "at_bounds": [
+        "pKy5"
+      ]
+    },
+    "fx_pure": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "mz_pure": {
+      "status": "ok",
+      "free": [
+        "qBz1",
+        "qBz2",
+        "qBz3",
+        "qBz4",
+        "qBz5",
+        "qBz9",
+        "qBz10",
+        "qCz1",
+        "qDz1",
+        "qDz2",
+        "qDz3",
+        "qDz4",
+        "qDz6",
+        "qDz7",
+        "qDz8",
+        "qDz9",
+        "qDz10",
+        "qDz11",
+        "qEz1",
+        "qEz2",
+        "qEz3",
+        "qEz4",
+        "qEz5",
+        "qHz1",
+        "qHz2",
+        "qHz3",
+        "qHz4",
+        "ppz1",
+        "ppz2"
+      ],
+      "cost": 13.558193606090322,
+      "nfev": 200,
+      "message": "The maximum number of function evaluations is exceeded.",
+      "seconds": 65.48,
+      "train": {
+        "n": 6000,
+        "rmse": 7.4380093497100255,
+        "nmae": 0.04464810269592596,
+        "r2": 0.9071905458353764
+      },
+      "val": null,
+      "at_bounds": [
+        "qDz8",
+        "qDz10",
+        "qEz5",
+        "qHz1",
+        "qHz2",
+        "qHz3",
+        "qHz4"
+      ]
+    },
+    "fx_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "fy_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "mz_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    }
+  },
+  "runs": [
+    {
+      "file": "B2356run13.dat",
+      "kind": "transient",
+      "pressure_sweep": false,
+      "n": 684.0,
+      "dt": 0.01,
+      "duration_s": 6.84,
+      "sa_amp_deg": 0.0162,
+      "sl_amp": 1.0002,
+      "sa_rate_degs": 0.065,
+      "sl_rate": 0.0015,
+      "n_fz_levels": 5.0,
+      "n_p_levels": 2.0,
+      "p_span_kpa": 1.11,
+      "n_ia_levels": 3.0,
+      "fz_med": 639.885,
+      "p_med": 82.46,
+      "ia_med_deg": 1.9795,
+      "v_med": 11.1639
+    },
+    {
+      "file": "B2356run14.dat",
+      "kind": "lateral",
+      "pressure_sweep": true,
+      "n": 61016.0,
+      "dt": 0.01,
+      "duration_s": 610.16,
+      "sa_amp_deg": 12.165,
+      "sl_amp": 1.0002,
+      "sa_rate_degs": 4.1625,
+      "sl_rate": 0.0013,
+      "n_fz_levels": 11.0,
+      "n_p_levels": 5.0,
+      "p_span_kpa": 32.12,
+      "n_ia_levels": 3.0,
+      "fz_med": 677.085,
+      "p_med": 82.51,
+      "ia_med_deg": 1.993,
+      "v_med": 11.1639
+    },
+    {
+      "file": "B2356run15.dat",
+      "kind": "lateral",
+      "pressure_sweep": true,
+      "n": 52308.0,
+      "dt": 0.01,
+      "duration_s": 523.08,
+      "sa_amp_deg": 12.1619,
+      "sl_amp": 1.0002,
+      "sa_rate_degs": 4.1625,
+      "sl_rate": 0.0013,
+      "n_fz_levels": 12.0,
+      "n_p_levels": 4.0,
+      "p_span_kpa": 33.18,
+      "n_ia_levels": 3.0,
+      "fz_med": 670.03,
+      "p_med": 82.11,
+      "ia_med_deg": 0.016,
+      "v_med": 11.1639
+    }
+  ]
+}

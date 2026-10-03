@@ -1,0 +1,205 @@
+{
+  "slug": "Goodyear_20_0X7_0_13_2704_7in",
+  "info": {
+    "signs": {
+      "fy": -1.0,
+      "mz": -1.0,
+      "fx": 1.0,
+      "ia": 1.0
+    },
+    "n_runs": {
+      "lateral": 2
+    },
+    "n_points": 6000,
+    "n_val": 0
+  },
+  "ident": {
+    "fz2": true,
+    "fz3": true,
+    "gamma": true,
+    "p": true,
+    "_levels": {
+      "fz": 9,
+      "gamma": 3,
+      "p": 5
+    }
+  },
+  "stages": {
+    "fy_pure": {
+      "status": "ok",
+      "free": [
+        "pCy1",
+        "pDy1",
+        "pDy2",
+        "pDy3",
+        "pEy1",
+        "pEy2",
+        "pEy3",
+        "pEy4",
+        "pEy5",
+        "pKy1",
+        "pKy2",
+        "pKy3",
+        "pKy4",
+        "pKy5",
+        "pKy6",
+        "pKy7",
+        "pHy1",
+        "pHy2",
+        "pVy1",
+        "pVy2",
+        "pVy3",
+        "pVy4",
+        "ppy1",
+        "ppy2",
+        "ppy3",
+        "ppy4",
+        "ppy5"
+      ],
+      "cost": 1.849679629779627,
+      "nfev": 31,
+      "message": "`ftol` termination condition is satisfied.",
+      "seconds": 8.46,
+      "train": {
+        "n": 6000,
+        "rmse": 109.05088729326144,
+        "nmae": 0.010446696394119541,
+        "r2": 0.996829264541215
+      },
+      "val": null,
+      "at_bounds": [
+        "pCy1",
+        "pKy5"
+      ]
+    },
+    "fx_pure": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "mz_pure": {
+      "status": "ok",
+      "free": [
+        "qBz1",
+        "qBz2",
+        "qBz3",
+        "qBz4",
+        "qBz5",
+        "qBz9",
+        "qBz10",
+        "qCz1",
+        "qDz1",
+        "qDz2",
+        "qDz3",
+        "qDz4",
+        "qDz6",
+        "qDz7",
+        "qDz8",
+        "qDz9",
+        "qDz10",
+        "qDz11",
+        "qEz1",
+        "qEz2",
+        "qEz3",
+        "qEz4",
+        "qEz5",
+        "qHz1",
+        "qHz2",
+        "qHz3",
+        "qHz4",
+        "ppz1",
+        "ppz2"
+      ],
+      "cost": 9.791097416864032,
+      "nfev": 200,
+      "message": "The maximum number of function evaluations is exceeded.",
+      "seconds": 65.5,
+      "train": {
+        "n": 6000,
+        "rmse": 10.696570373433435,
+        "nmae": 0.03184477529518572,
+        "r2": 0.9432622511460899
+      },
+      "val": null,
+      "at_bounds": [
+        "qDz8",
+        "qDz10",
+        "qHz1",
+        "qHz4"
+      ]
+    },
+    "fx_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "fy_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    },
+    "mz_comb": {
+      "status": "skipped",
+      "reason": "datos insuficientes (0)"
+    }
+  },
+  "runs": [
+    {
+      "file": "B2356run22.dat",
+      "kind": "transient",
+      "pressure_sweep": false,
+      "n": 684.0,
+      "dt": 0.01,
+      "duration_s": 6.84,
+      "sa_amp_deg": 0.016,
+      "sl_amp": 0.0193,
+      "sa_rate_degs": 0.06,
+      "sl_rate": 0.1065,
+      "n_fz_levels": 5.0,
+      "n_p_levels": 2.0,
+      "p_span_kpa": 1.47,
+      "n_ia_levels": 3.0,
+      "fz_med": 626.905,
+      "p_med": 82.71,
+      "ia_med_deg": 1.995,
+      "v_med": 11.1556
+    },
+    {
+      "file": "B2356run23.dat",
+      "kind": "lateral",
+      "pressure_sweep": true,
+      "n": 61048.0,
+      "dt": 0.01,
+      "duration_s": 610.48,
+      "sa_amp_deg": 12.232,
+      "sl_amp": 0.0884,
+      "sa_rate_degs": 4.16,
+      "sl_rate": 0.0245,
+      "n_fz_levels": 19.0,
+      "n_p_levels": 6.0,
+      "p_span_kpa": 34.6,
+      "n_ia_levels": 3.0,
+      "fz_med": 673.735,
+      "p_med": 82.56,
+      "ia_med_deg": 1.995,
+      "v_med": 11.1556
+    },
+    {
+      "file": "B2356run24.dat",
+      "kind": "lateral",
+      "pressure_sweep": true,
+      "n": 52320.0,
+      "dt": 0.01,
+      "duration_s": 523.2,
+      "sa_amp_deg": 12.232,
+      "sl_amp": 0.1068,
+      "sa_rate_degs": 4.165,
+      "sl_rate": 0.028,
+      "n_fz_levels": 19.0,
+      "n_p_levels": 6.0,
+      "p_span_kpa": 39.81,
+      "n_ia_levels": 3.0,
+      "fz_med": 669.8,
+      "p_med": 82.16,
+      "ia_med_deg": 0.016,
+      "v_med": 11.1583
+    }
+  ]
+}

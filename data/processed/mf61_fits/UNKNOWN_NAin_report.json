@@ -1,0 +1,75 @@
+{
+  "slug": "UNKNOWN_NAin",
+  "info": {
+    "signs": {
+      "fy": 1.0,
+      "mz": 1.0,
+      "fx": 1.0,
+      "ia": 1.0
+    },
+    "n_runs": {
+      "combined": 1
+    },
+    "n_points": 40000,
+    "n_val": 0
+  },
+  "ident": {
+    "fz2": true,
+    "fz3": true,
+    "gamma": true,
+    "p": true,
+    "_levels": {
+      "fz": 11,
+      "gamma": 3,
+      "p": 5
+    }
+  },
+  "stages": {
+    "fy_pure": {
+      "status": "failed",
+      "reason": "least_squares no convergio"
+    },
+    "fx_pure": {
+      "status": "failed",
+      "reason": "least_squares no convergio"
+    },
+    "mz_pure": {
+      "status": "failed",
+      "reason": "least_squares no convergio"
+    },
+    "fx_comb": {
+      "status": "failed",
+      "reason": "least_squares no convergio"
+    },
+    "fy_comb": {
+      "status": "failed",
+      "reason": "least_squares no convergio"
+    },
+    "mz_comb": {
+      "status": "failed",
+      "reason": "least_squares no convergio"
+    }
+  },
+  "runs": [
+    {
+      "file": "B2356run20.dat",
+      "kind": "combined",
+      "pressure_sweep": true,
+      "n": 61026.0,
+      "dt": 0.01,
+      "duration_s": 610.26,
+      "sa_amp_deg": 12.198,
+      "sl_amp": 0.0443,
+      "sa_rate_degs": 4.16,
+      "sl_rate": 0.0158,
+      "n_fz_levels": 15.0,
+      "n_p_levels": 5.0,
+      "p_span_kpa": 32.01,
+      "n_ia_levels": 3.0,
+      "fz_med": 680.76,
+      "p_med": 82.46,
+      "ia_med_deg": 1.993,
+      "v_med": 11.1556
+    }
+  ]
+}

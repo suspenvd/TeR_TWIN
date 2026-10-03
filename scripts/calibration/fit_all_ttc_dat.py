@@ -105,9 +105,12 @@ class FitConfig:
 # --------------------------------------------------------------------------------------------
 # Parser TTC
 # --------------------------------------------------------------------------------------------
-_CANON = {"ET": "et", "V": "v", "SA": "sa", "IA": "ia", "SL": "sl", "SR": "sl", "RL": "rl", "RE": "re",
+_CANON = {"ET": "et", "V": "v", "SA": "sa", "IA": "ia", "SL": "sl", "SR": "kappa_raw", "RL": "rl", "RE": "re",
           "P": "p", "FX": "fx", "FY": "fy", "FZ": "fz", "MX": "mx", "MZ": "mz", "MU": "mu", "N": "n",
           "RST": "rst", "AMBTMP": "amb", "NFX": "nfx", "NFY": "nfy"}
+# Note: TTC DriveBrake files use 'SR' column (SAE slip-ratio = kappa in SAE sign).  We parse it as
+# 'kappa_raw' and then remap to 'sl' below so the rest of the pipeline sees a unified 'sl' channel.
+# Cornering files use 'SL' (=0 sentinel) already mapped to 'sl'.
 
 _NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
@@ -122,6 +125,7 @@ class TTCRun:
     kind: str = "unknown"
     pressure_sweep: bool = False
     desc: dict[str, float] = dataclasses.field(default_factory=dict)
+    has_sr_col: bool = False   # True when the file has the 'SR' (slip-ratio) column
 
 
 def _parse_rim_width(text: str | None, fallback: str = "") -> float:
@@ -151,7 +155,7 @@ def _unit_scale(canon: str, unit: str | None) -> float:
         return {"psi": 6.894757, "bar": 100.0, "pa": 1e-3}.get(u, 1.0)
     if canon in ("rl", "re"):
         return {"m": 1.0, "mm": 1e-3, "in": 0.0254}.get(u, 0.01)
-    if canon == "sl":
+    if canon in ("sl", "kappa_raw"):
         return 0.01 if u == "%" else 1.0
     if canon in ("fx", "fy", "fz"):
         return 4.448222 if u.startswith("lb") else 1.0
@@ -247,11 +251,15 @@ def parse_ttc(path: Path, *, meta_only: bool = False) -> TTCRun:
         if canon:
             unit = units[j] if units and len(units) == len(hdr) else None
             run.ch[canon] = arr[:, j].astype(np.float64) * _unit_scale(canon, unit)
-            
+
+    # Unificar canales SL / SR (en TTC SAE: SR > 0 frenada; pasamos a Fx > 0 con +kappa)
+    if "kappa_raw" in run.ch:
+        run.ch["sl"] = -run.ch.pop("kappa_raw")
+
     for req in ("sa", "fy", "fz"):
         if req not in run.ch:
             raise ValueError(f"{path.name}: falta canal {req.upper()}")
-            
+
     n = len(run.ch["sa"])
     run.ch["fz"] = np.abs(run.ch["fz"])
     for opt, fill in (("ia", 0.0), ("sl", 0.0), ("fx", np.nan), ("mz", np.nan), ("p", np.nan), ("v", np.nan)):
@@ -321,16 +329,26 @@ def classify(run: TTCRun, th: Thresholds, manifest: dict | None = None) -> None:
         run.kind = forced["kind"]
     elif "warm" in name:
         run.kind = "warmup"
-    # En la Ronda 9, los step-steers transitorios solo barren hasta 6.0 deg de SA
-    elif "trans" in name or d["sa_amp_deg"] <= 8.0:
+    # Calibraciones cortas de 6 segundos o menos de 1500 muestras
+    elif "trans" in name or d["duration_s"] < 15.0 or d["n"] < 1500:
         run.kind = "transient"
-    # Ensayos cuasi-estáticos de esquina (barridos de SA hasta ~12 deg)
-    elif d["sa_amp_deg"] > th.lat_sa_deg:
+    # Barridos dinamicos rapidos de direccion (rampas a 8 deg/s)
+    elif d["sa_rate_degs"] > 6.0:
+        run.kind = "transient"
+    # Viraje continuo en rodillo libre (Cornering puro: dSA/dt ~ 4.2 deg/s, barrido a 12 deg)
+    elif d["sa_rate_degs"] > 2.0 and d["sa_amp_deg"] > 5.0:
         run.kind = "lateral"
-    elif d["sl_amp"] >= 0.10:
-        run.kind = "longitudinal"
+        # Limpiar el centinela 1.0 o el slip parasito: en cornering puro la rueda gira libre
+        run.ch["sl"] = np.zeros(len(run.ch["sa"]))
+        d["sl_amp"] = 0.0
+    # Ensayos de traccion/frenada controlada (Drive/Brake: SA fijo a 0.1 deg/s y barrido de motor)
+    elif d["sl_amp"] >= 0.15:
+        if d["sa_amp_deg"] <= th.long_max_sa_deg:
+            run.kind = "longitudinal"
+        else:
+            run.kind = "combined"
     else:
-        run.kind = "lateral"
+        run.kind = "transient"
 
     run.pressure_sweep = bool(forced.get("pressure_sweep", d["p_span_kpa"] >= th.pressure_span_kpa))
 
@@ -385,23 +403,53 @@ def assemble(runs: Sequence[TTCRun], cfg: FitConfig) -> tuple[dict[str, np.ndarr
     rng = np.random.default_rng(cfg.seed)
     per_kind: dict[str, list[dict[str, np.ndarray]]] = defaultdict(list)
     run_idx: dict[str, int] = defaultdict(int)
+    # SL=1.0 is the Calspan machine sentinel for "free-rolling" — discard it
+    _SL_SENTINEL = 1.0
+    _SL_SENTINEL_TOL = 0.005
     for r in runs:
         if r.kind not in STEADY_KINDS:
             continue
         c = r.ch
         m = np.isfinite(c["sa"]) & np.isfinite(c["fy"]) & (c["fz"] >= cfg.min_fz)
+        # Descartar cualquier punto centinela residual (|kappa| ≈ 1.0 o no fisico)
+        m &= np.abs(c["sl"]) < 0.45
         if np.isfinite(c["v"]).any():
             m &= np.nan_to_num(c["v"], nan=1e9) >= cfg.min_speed
         if cfg.trim_s > 0 and "et" in c:
             m &= (c["et"] - c["et"][0]) >= cfg.trim_s
         if m.sum() < 50:
             continue
+        # Override kind based on per-sample slip values for mixed runs (combined sweep files)
+        sl_m = np.abs(c["sl"][m])
+        sa_m = np.abs(c["sa"][m])
+        if r.kind == "combined":
+            # Tag each point individually
+            kind_arr = np.where(
+                sa_m > np.radians(0.5),
+                np.int8(2),   # combined
+                np.int8(1),   # ~pure longitudinal
+            )
+        elif r.kind == "longitudinal":
+            # Some longitudinal sweeps include small combined-slip points at non-zero alpha
+            kind_arr = np.where(
+                sa_m > np.radians(0.5),
+                np.int8(2),   # combined
+                np.int8(1),   # pure longitudinal
+            )
+        elif r.kind == "lateral":
+            kind_arr = np.where(
+                sl_m > 0.01,
+                np.int8(2),   # combined
+                np.int8(0),   # pure lateral
+            )
+        else:
+            kind_arr = np.full(m.sum(), KIND_CODE[r.kind], np.int8)
         rid = run_idx[r.kind]
         run_idx[r.kind] += 1
         per_kind[r.kind].append({
             "alpha": c["sa"][m], "kappa": c["sl"][m], "gamma": c["ia"][m] * cfg.ia_sign,
             "fz": c["fz"][m], "p": c["p"][m], "fx": c["fx"][m], "fy": c["fy"][m], "mz": c["mz"][m],
-            "kind": np.full(m.sum(), KIND_CODE[r.kind], np.int8), "run": np.full(m.sum(), rid, np.int32),
+            "kind": kind_arr, "run": np.full(m.sum(), rid, np.int32),
         })
     cols = ("alpha", "kappa", "gamma", "fz", "p", "fx", "fy", "mz", "kind", "run")
     chunks: dict[str, list[np.ndarray]] = {k: [] for k in cols}

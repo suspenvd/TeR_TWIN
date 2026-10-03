@@ -56,19 +56,18 @@
         "ppy4",
         "ppy5"
       ],
-      "cost": 1.140175594839459,
-      "nfev": 41,
+      "cost": 1.093409481778361,
+      "nfev": 30,
       "message": "`ftol` termination condition is satisfied.",
-      "seconds": 12.24,
+      "seconds": 8.64,
       "train": {
         "n": 6000,
-        "rmse": 58.64365919967894,
-        "nmae": 0.00825513082200849,
-        "r2": 0.9985242481507333
+        "rmse": 57.0343327599536,
+        "nmae": 0.008073416113246636,
+        "r2": 0.9986041333092276
       },
       "val": null,
       "at_bounds": [
-        "pEy4",
         "pEy5",
         "pKy5"
       ]
@@ -110,22 +109,20 @@
         "ppz1",
         "ppz2"
       ],
-      "cost": 13.049643152027008,
-      "nfev": 191,
-      "message": "`ftol` termination condition is satisfied.",
-      "seconds": 32.62,
+      "cost": 13.043089470467281,
+      "nfev": 200,
+      "message": "The maximum number of function evaluations is exceeded.",
+      "seconds": 18.97,
       "train": {
         "n": 6000,
-        "rmse": 7.764860758450329,
-        "nmae": 0.04152412802815756,
-        "r2": 0.9164105121077029
+        "rmse": 7.7327264441578984,
+        "nmae": 0.04159359822983255,
+        "r2": 0.9171009385976336
       },
       "val": null,
       "at_bounds": [
         "qDz8",
         "qDz10",
-        "qDz11",
-        "qEz5",
         "qHz1",
         "qHz3",
         "qHz4"
@@ -173,7 +170,7 @@
       "dt": 0.01,
       "duration_s": 610.2,
       "sa_amp_deg": 12.18,
-      "sl_amp": 1.0002,
+      "sl_amp": 0.0,
       "sa_rate_degs": 4.1625,
       "sl_rate": 0.0012,
       "n_fz_levels": 10.0,
@@ -193,7 +190,7 @@
       "dt": 0.01,
       "duration_s": 523.22,
       "sa_amp_deg": 12.186,
-      "sl_amp": 1.0002,
+      "sl_amp": 0.0,
       "sa_rate_degs": 4.1525,
       "sl_rate": 0.0012,
       "n_fz_levels": 11.0,

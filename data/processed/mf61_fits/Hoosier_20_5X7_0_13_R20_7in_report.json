@@ -4,13 +4,14 @@
     "signs": {
       "fy": -1.0,
       "mz": -1.0,
-      "fx": 1.0,
+      "fx": -1.0,
       "ia": 1.0
     },
     "n_runs": {
-      "lateral": 2
+      "lateral": 2,
+      "combined": 2
     },
-    "n_points": 6000,
+    "n_points": 12000,
     "n_val": 0
   },
   "ident": {
@@ -19,9 +20,9 @@
     "gamma": true,
     "p": true,
     "_levels": {
-      "fz": 7,
+      "fz": 13,
       "gamma": 3,
-      "p": 5
+      "p": 6
     }
   },
   "stages": {
@@ -56,15 +57,15 @@
         "ppy4",
         "ppy5"
       ],
-      "cost": 1.2102781667419777,
-      "nfev": 16,
+      "cost": 1.582472759107344,
+      "nfev": 19,
       "message": "`ftol` termination condition is satisfied.",
-      "seconds": 7.34,
+      "seconds": 4.55,
       "train": {
-        "n": 6000,
-        "rmse": 80.76227931533006,
-        "nmae": 0.008317227201452927,
-        "r2": 0.9981301266099759
+        "n": 6185,
+        "rmse": 97.48210086223162,
+        "nmae": 0.009400931452722998,
+        "r2": 0.997248996382326
       },
       "val": null,
       "at_bounds": [
@@ -75,8 +76,40 @@
       ]
     },
     "fx_pure": {
-      "status": "skipped",
-      "reason": "datos insuficientes (0)"
+      "status": "ok",
+      "free": [
+        "pCx1",
+        "pDx1",
+        "pDx2",
+        "pDx3",
+        "pEx1",
+        "pEx2",
+        "pEx3",
+        "pEx4",
+        "pKx1",
+        "pKx2",
+        "pKx3",
+        "pHx1",
+        "pHx2",
+        "pVx1",
+        "pVx2",
+        "ppx1",
+        "ppx2",
+        "ppx3",
+        "ppx4"
+      ],
+      "cost": 1.0850504194599742,
+      "nfev": 27,
+      "message": "Both `ftol` and `xtol` termination conditions are satisfied.",
+      "seconds": 0.61,
+      "train": {
+        "n": 1840,
+        "rmse": 161.88883015086085,
+        "nmae": 0.016891887221416182,
+        "r2": 0.992822010510937
+      },
+      "val": null,
+      "at_bounds": []
     },
     "mz_pure": {
       "status": "ok",
@@ -111,15 +144,15 @@
         "ppz1",
         "ppz2"
       ],
-      "cost": 12.484418049964868,
-      "nfev": 29,
+      "cost": 14.975339620270272,
+      "nfev": 49,
       "message": "`ftol` termination condition is satisfied.",
-      "seconds": 8.46,
+      "seconds": 13.52,
       "train": {
-        "n": 6000,
-        "rmse": 9.562748293931167,
-        "nmae": 0.03851639472531129,
-        "r2": 0.9133845279991493
+        "n": 6185,
+        "rmse": 11.497437808896215,
+        "nmae": 0.043202081772773286,
+        "r2": 0.8762024722413271
       },
       "val": null,
       "at_bounds": [
@@ -132,16 +165,90 @@
       ]
     },
     "fx_comb": {
-      "status": "skipped",
-      "reason": "datos insuficientes (0)"
+      "status": "ok",
+      "free": [
+        "rBx1",
+        "rBx2",
+        "rBx3",
+        "rCx1",
+        "rEx1",
+        "rEx2",
+        "rHx1"
+      ],
+      "cost": 3.739469917451398,
+      "nfev": 91,
+      "message": "`ftol` termination condition is satisfied.",
+      "seconds": 4.82,
+      "train": {
+        "n": 4160,
+        "rmse": 188.03316940800988,
+        "nmae": 0.022130269515099384,
+        "r2": 0.985992862450466
+      },
+      "val": null,
+      "at_bounds": [
+        "rBx1",
+        "rBx3"
+      ]
     },
     "fy_comb": {
-      "status": "skipped",
-      "reason": "datos insuficientes (0)"
+      "status": "ok",
+      "free": [
+        "rBy1",
+        "rBy2",
+        "rBy3",
+        "rBy4",
+        "rCy1",
+        "rEy1",
+        "rEy2",
+        "rHy1",
+        "rHy2",
+        "rVy1",
+        "rVy2",
+        "rVy3",
+        "rVy4",
+        "rVy5",
+        "rVy6"
+      ],
+      "cost": 3.1709203199056404,
+      "nfev": 105,
+      "message": "`ftol` termination condition is satisfied.",
+      "seconds": 9.91,
+      "train": {
+        "n": 4160,
+        "rmse": 132.54575224164896,
+        "nmae": 0.035463601464615656,
+        "r2": 0.9620966097174309
+      },
+      "val": null,
+      "at_bounds": [
+        "rBy4",
+        "rVy5"
+      ]
     },
     "mz_comb": {
-      "status": "skipped",
-      "reason": "datos insuficientes (0)"
+      "status": "ok",
+      "free": [
+        "sSz1",
+        "sSz2",
+        "sSz3",
+        "sSz4"
+      ],
+      "cost": 43.38863010571369,
+      "nfev": 6,
+      "message": "`gtol` termination condition is satisfied.",
+      "seconds": 3.75,
+      "train": {
+        "n": 4160,
+        "rmse": 37.4125228443752,
+        "nmae": 0.1848654188855716,
+        "r2": 0.09950058488656366
+      },
+      "val": null,
+      "at_bounds": [
+        "sSz3",
+        "sSz4"
+      ]
     }
   },
   "runs": [
@@ -173,7 +280,7 @@
       "dt": 0.01,
       "duration_s": 610.44,
       "sa_amp_deg": 12.21,
-      "sl_amp": 0.0496,
+      "sl_amp": 0.0,
       "sa_rate_degs": 4.1575,
       "sl_rate": 0.0153,
       "n_fz_levels": 17.0,
@@ -193,7 +300,7 @@
       "dt": 0.01,
       "duration_s": 523.17,
       "sa_amp_deg": 12.213,
-      "sl_amp": 0.0701,
+      "sl_amp": 0.0,
       "sa_rate_degs": 4.1625,
       "sl_rate": 0.0173,
       "n_fz_levels": 17.0,
@@ -203,6 +310,66 @@
       "fz_med": 670.41,
       "p_med": 82.26,
       "ia_med_deg": 0.016,
+      "v_med": 11.1556
+    },
+    {
+      "file": "B2356run50.dat",
+      "kind": "transient",
+      "pressure_sweep": false,
+      "n": 19344.0,
+      "dt": 0.01,
+      "duration_s": 193.44,
+      "sa_amp_deg": 11.983,
+      "sl_amp": 0.0711,
+      "sa_rate_degs": 8.2475,
+      "sl_rate": 0.0488,
+      "n_fz_levels": 17.0,
+      "n_p_levels": 1.0,
+      "p_span_kpa": 1.77,
+      "n_ia_levels": 17.0,
+      "fz_med": 1097.37,
+      "p_med": 83.93,
+      "ia_med_deg": 0.005,
+      "v_med": 11.1556
+    },
+    {
+      "file": "B2356run51.dat",
+      "kind": "combined",
+      "pressure_sweep": true,
+      "n": 68883.0,
+      "dt": 0.01,
+      "duration_s": 688.83,
+      "sa_amp_deg": 6.005,
+      "sl_amp": 0.227,
+      "sa_rate_degs": 0.06,
+      "sl_rate": 0.2358,
+      "n_fz_levels": 18.0,
+      "n_p_levels": 5.0,
+      "p_span_kpa": 30.25,
+      "n_ia_levels": 3.0,
+      "fz_med": 723.01,
+      "p_med": 83.12,
+      "ia_med_deg": 1.992,
+      "v_med": 11.1556
+    },
+    {
+      "file": "B2356run52.dat",
+      "kind": "combined",
+      "pressure_sweep": true,
+      "n": 60805.0,
+      "dt": 0.01,
+      "duration_s": 608.05,
+      "sa_amp_deg": 6.005,
+      "sl_amp": 0.2358,
+      "sa_rate_degs": 0.06,
+      "sl_rate": 0.2415,
+      "n_fz_levels": 19.0,
+      "n_p_levels": 3.0,
+      "p_span_kpa": 30.24,
+      "n_ia_levels": 3.0,
+      "fz_med": 718.64,
+      "p_med": 83.72,
+      "ia_med_deg": 1.97,
       "v_med": 11.1556
     }
   ]

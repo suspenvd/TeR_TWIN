@@ -56,15 +56,15 @@
         "ppy4",
         "ppy5"
       ],
-      "cost": 1.2665384999627307,
-      "nfev": 21,
+      "cost": 1.2665385492343748,
+      "nfev": 22,
       "message": "`ftol` termination condition is satisfied.",
-      "seconds": 11.75,
+      "seconds": 8.63,
       "train": {
         "n": 6000,
-        "rmse": 58.14352301440907,
-        "nmae": 0.008838021992257375,
-        "r2": 0.9982781496580256
+        "rmse": 58.14353417595366,
+        "nmae": 0.008838017145944966,
+        "r2": 0.9982781489969541
       },
       "val": null,
       "at_bounds": [
@@ -110,15 +110,15 @@
         "ppz1",
         "ppz2"
       ],
-      "cost": 12.987147484586687,
-      "nfev": 47,
+      "cost": 12.987129328738687,
+      "nfev": 87,
       "message": "`ftol` termination condition is satisfied.",
-      "seconds": 12.66,
+      "seconds": 23.34,
       "train": {
         "n": 6000,
-        "rmse": 7.376728328797164,
-        "nmae": 0.041281358810389156,
-        "r2": 0.9231869624855294
+        "rmse": 7.3767313545327085,
+        "nmae": 0.04128133438722072,
+        "r2": 0.9231868994722328
       },
       "val": null,
       "at_bounds": [
@@ -172,7 +172,7 @@
       "dt": 0.01,
       "duration_s": 610.41,
       "sa_amp_deg": 12.207,
-      "sl_amp": 1.0002,
+      "sl_amp": 0.0,
       "sa_rate_degs": 4.1675,
       "sl_rate": 0.0013,
       "n_fz_levels": 11.0,
@@ -192,7 +192,7 @@
       "dt": 0.01,
       "duration_s": 523.29,
       "sa_amp_deg": 12.223,
-      "sl_amp": 1.0002,
+      "sl_amp": 0.0,
       "sa_rate_degs": 4.17,
       "sl_rate": 0.0013,
       "n_fz_levels": 12.0,

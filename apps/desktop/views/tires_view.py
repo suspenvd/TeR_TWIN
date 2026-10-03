@@ -28,7 +28,7 @@ import time
 import tkinter as tk
 from dataclasses import dataclass, field
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Any, Callable
 
 import numpy as np
@@ -66,7 +66,7 @@ TABS: tuple[str, ...] = (
     "Interacción comb.", "Sens. carga", "Sens. presión", "Rigideces y degres.",
     "Camber", 'Comparativa 7" vs 8"',
 )
-LINESTYLES: tuple[str, ...] = ("-", "--", "-.", ":")
+LINESTYLES: tuple[str, ...] = ("-", "-", "-", "-")
 CMP_KEYS: tuple[str, ...] = ("c_alpha_N_deg", "mu_y_peak", "mu_x_peak", "fy_peak_N",
                              "mz_peak_Nm", "trail0_mm", "c_kappa_N")
 ALL_RIMS = "Todas las llantas"
@@ -131,13 +131,47 @@ class Entry:
         return self._data
 
 
+def get_semantic_tire_color(tire_name: str, rim: float) -> str:
+    name = tire_name.lower()
+
+    # Goodyear -> Gama amarilla / ámbar / dorada
+    if "goodyear" in name:
+        if rim >= 7.5:
+            return "#f0883e"  # Naranja ámbar (8")
+        elif rim >= 6.5:
+            return "#e3b341"  # Amarillo competición (7")
+        return "#d29922"      # Mostaza / dorado (6")
+
+    # MRF -> Gama roja / coral
+    if "mrf" in name:
+        return "#ff7b72" if rim >= 6.5 else "#f85149"
+
+    # Hoosier 16" -> Gama violeta / púrpura
+    if "hoosier" in name and "16" in name:
+        if rim >= 7.5:
+            return "#d2a8ff"  # Lavanda claro (8")
+        elif rim >= 6.5:
+            return "#bc8cff"  # Violeta puro (7")
+        return "#8a63d2"      # Púrpura profundo (6")
+
+    # Hoosier 18" y 20.5" -> Gama azul eléctrico / celeste
+    if "hoosier" in name:
+        if rim >= 7.5:
+            return "#79c0ff"  # Celeste cielo (8")
+        elif rim >= 6.5:
+            return "#58a6ff"  # Azul eléctrico (7")
+        return "#1f6feb"      # Azul marino saturado (6")
+
+    return "#3fb950"  # Verde esmeralda por defecto
+
+
 class Store:
-    def __init__(self, entries: list[Entry]) -> None:
+    def __init__(self, entries: list[Entry]):
         self.entries = entries
         self.by_slug = {e.slug: e for e in entries}
         self.rims = sorted({e.rim for e in entries if np.isfinite(e.rim)})
-        # One colour per slug: 7" and 8" variants of the same tyre never share a hue.
-        self.color = {e.slug: TYRE_PALETTE[i % len(TYRE_PALETTE)] for i, e in enumerate(entries)}
+        # Asignación semántica directa
+        self.color = {e.slug: get_semantic_tire_color(e.tire_name, e.rim) for e in entries}
 
     @classmethod
     def from_index(cls, index_path: Path) -> "Store":
@@ -920,6 +954,14 @@ class TiresView(BaseView):
             else:
                 self._canvas_l.unbind_all(seq)
 
+    def _pick_color(self, slug: str, swatch_widget: tk.Label) -> None:
+        current_col = self.store.color.get(slug, "#58a6ff")
+        _, hex_col = colorchooser.askcolor(color=current_col, title=f"Color para {slug}", parent=self)
+        if hex_col:
+            self.store.color[slug] = hex_col
+            swatch_widget.configure(bg=hex_col)
+            self._schedule_redraw()
+
     def _rebuild_list(self) -> None:
         for w in self._inner.winfo_children():
             w.destroy()
@@ -929,13 +971,28 @@ class TiresView(BaseView):
                 continue
             row = tk.Frame(self._inner, bg=_BG)
             row.pack(anchor="w", fill="x", pady=2)
-            tk.Label(row, bg=self.store.color[e.slug], width=2, height=1, relief="flat").pack(side="left", padx=(2, 6))
-            tk.Checkbutton(
-                row, text=f"{e.label}  ({self.engine.style(e)[1]})", variable=self._checks[e.slug],
-                command=self._schedule_redraw, bg=_BG, fg=_FG, selectcolor="#1f6feb",
-                activebackground=_BG3, activeforeground="#ffffff", font=("Segoe UI", 9),
-                cursor="hand2", highlightthickness=0, bd=0,
-            ).pack(side="left")
+
+            # Cuadro de color interactivo con cursor tipo mano
+            swatch = tk.Label(row, bg=self.store.color[e.slug], width=2, height=1, relief="flat", cursor="hand2")
+            swatch.pack(side="left", padx=(2, 6))
+            swatch.bind("<Button-1>", lambda _evt, s=e.slug, sw=swatch: self._pick_color(s, sw))
+
+            cb = tk.Checkbutton(
+                row,
+                text=f"{e.label}",
+                variable=self._checks[e.slug],
+                command=self._schedule_redraw,
+                bg=_BG,
+                fg=_FG,
+                selectcolor="#1f6feb",
+                activebackground=_BG3,
+                activeforeground="#ffffff",
+                font=("Segoe UI", 9),
+                cursor="hand2",
+                highlightthickness=0,
+                bd=0,
+            )
+            cb.pack(side="left")
 
     def _set_all(self, val: bool) -> None:
         for v in self._checks.values():

@@ -39,3 +39,8 @@ reports/*
 .idea/
 *.swp
 *~
+
+# Windows Alternate Data Streams (Zone.Identifier)
+*:Zone.Identifier
+*Zone.Identifier*
+*Zone.Identifier

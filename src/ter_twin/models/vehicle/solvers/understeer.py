@@ -11,11 +11,10 @@ import jax.numpy as jnp
 import numpy as np
 
 from ter_twin.models.tires import pacejka_61 as mf
-
-from ..load_transfer import steady_roll, wheel_loads
+from ter_twin.models.suspension.load_transfer import steady_roll, wheel_loads
+from ter_twin.models.powertrain.in_hub_4wd import torque_limits
+from ter_twin.models.tires.interface import rolling_radius, stacked_tire_params
 from ..parameters import G, VehicleParams
-from ..powertrain import torque_limits
-from ..tire_interface import rolling_radius, stacked_tire_params
 from .qss_solver import TrimResult, solve_trim
 
 

@@ -15,12 +15,13 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from ..kinematics import camber_toe, steer_angles
-from ..load_transfer import LoadState, steady_roll, wheel_loads
+from ter_twin.models.suspension.kinematics import camber_toe, steer_angles
+from ter_twin.models.suspension.load_transfer import LoadState, steady_roll, wheel_loads
+from ter_twin.models.powertrain.in_hub_4wd import TVOut, tv_allocate
+from ter_twin.models.tires.interface import (
+    TireOut, body_loads, tire_forces, wheel_slips
+)
 from ..parameters import VehicleParams
-from ..powertrain import TVOut, tv_allocate
-from ..tire_interface import (TireOut, body_loads, tire_forces,
-                              wheel_slips)
 
 
 class Prep(NamedTuple):

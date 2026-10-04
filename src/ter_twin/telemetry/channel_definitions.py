@@ -125,10 +125,37 @@ VIRTUAL_CHANNELS: tuple[str, ...] = tuple(n for n, s in CHANNELS.items() if s.vi
 
 # ---- name resolution ---------------------------------------------------------------------------------
 _EXTRA_ALIASES = {
-    "speed": "vx", "vehicle_speed": "vx", "yawrate": "yaw_rate", "steering": "steer_angle",
-    "steer": "steer_angle", "throttle": "throttle_pct", "tps": "throttle_pct", "latitude": "gps_lat",
-    "lat": "gps_lat", "longitude": "gps_lon", "lon": "gps_lon", "beacon": "lap_beacon",
-    "accel_x": "ax", "accel_y": "ay", "brake_front": "brake_press_front", "brake_rear": "brake_press_rear",
+    # Velocidad y aceleraciones (IMU BO_ 26, 28 y ECU BO_ 21, 39)
+    "speed": "vx", "vehicle_speed": "vx", "v_x": "vx", "vx_av": "vx",
+    "speed_actual": "vx", "accel_x": "ax", "a_x": "ax",
+    "acceleration_longitudinal": "ax", "accel_y": "ay", "a_y": "ay",
+    "acceleration_lateral": "ay", "a_z": "az", "yawrate": "yaw_rate",
+    "yaw_rate_z": "yaw_rate", "yaw_rate": "yaw_rate",
+
+    # Pedales y Dirección (PEDAL BO_ 3, 4, 5)
+    "apps_av": "throttle_pct", "apps_1": "throttle_pct", "throttle": "throttle_pct",
+    "bpps": "brake_press_front", "brake_front": "brake_press_front",
+    "brake_hydr_actual": "brake_press_front",
+    "angle": "steer_angle", "steering": "steer_angle", "steer": "steer_angle",
+    "steering_angle_actual": "steer_angle",
+
+    # Suspensiones y Recorridos (FRONT_AXLE BO_ 35 y 42)
+    "fldisp": "damper_travel_fl", "frdisp": "damper_travel_fr",
+    "rldisp": "damper_travel_rl", "rrdisp": "damper_travel_rr",
+
+    # Batería y Estado LV (LVBMS BO_ 18, 19)
+    "v_tot": "battery_voltage", "current": "battery_current",
+    "soc": "soc", "v_min": "min_cell_voltage",
+
+    # GPS (IMU BO_ 24)
+    "latitude": "gps_lat", "lat": "gps_lat",
+    "longitude": "gps_lon", "lon": "gps_lon",
+
+    # Temperaturas y Ruedas
+    "rlrpm": "wheel_speed_rl", "rrrpm": "wheel_speed_rr",
+    "rpm_l": "wheel_speed_fl", "rpm_r": "wheel_speed_fr",
+    "leftmotortemp": "motor_temp_fl", "rightmotortemp": "motor_temp_fr",
+    "leftpowerstagetemp": "inverter_temp_fl", "rightpowerstagetemp": "inverter_temp_fr",
 }
 
 

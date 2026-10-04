@@ -15,7 +15,8 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
-
+import re
+import cantools
 import numpy as np
 from scipy.signal import filtfilt, butter, lfilter
 
@@ -210,9 +211,113 @@ def load_mat(path: Path, fs: float = FS_DEFAULT) -> LogData:
     raw = {k: v for k, v in raw.items() if v.size == t.size}
     return _build(t, raw, fs, path, {"format": "mat"})
 
+_CANDUMP_RE = re.compile(
+    r"\s*\((?P<t>\d+\.\d+)\)\s+\S+\s+(?P<id>[0-9A-Fa-f]+)#(?P<data>[0-9A-Fa-f]*)"
+)
 
-_LOADERS = {".mf4": load_mf4, ".mdf": load_mf4, ".csv": load_csv, ".npz": load_npz, ".mat": load_mat}
+DEFAULT_DBC_PATH = Path(__file__).resolve().parents[3] / "config" / "can" / "dbc" / "TER.dbc"
 
+def load_candump(path: Path, fs: float = FS_DEFAULT, dbc_path: Path | None = None) -> LogData:
+    """Parsea un fichero ASCII de Linux SocketCAN (candump -l) con un archivo .dbc."""
+    dbc = Path(dbc_path or DEFAULT_DBC_PATH)
+    if not dbc.exists():
+        # Búsqueda automática en config/dbc/
+        found = list(dbc.parent.glob("*.dbc"))
+        if found:
+            dbc = found[0]
+        else:
+            raise FileNotFoundError(
+                f"No se encontró el archivo DBC en {dbc}. Coloca TER.dbc en config/dbc/"
+            )
+
+    db = cantools.database.load_file(str(dbc))
+    msgs_by_id = {m.frame_id: m for m in db.messages}
+
+    # Mapa de mensajes de temperaturas de neumáticos (promedia TW1..TW4)
+    tire_temp_ids = {1008: "tire_temp_fl", 1012: "tire_temp_fr", 1016: "tire_temp_rr", 1020: "tire_temp_rl"}
+
+    from .can_decoder import FrameAssembler
+
+    # 1. Primera pasada: extraer nombres de canales decodificables
+    sample_names = set()
+    for m in db.messages:
+        for s in m.signals:
+            sample_names.add(resolve_channel_name(s.name))
+    sample_names.update(tire_temp_ids.values())
+
+    asm = FrameAssembler(list(sample_names), hz=fs)
+    out_t: list[float] = []
+    out_rows: list[np.ndarray] = []
+    t0: float | None = None
+
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            m = _CANDUMP_RE.match(line)
+            if not m:
+                continue
+
+            t_val = float(m.group("t"))
+            if t0 is None:
+                t0 = t_val
+            t_rel = t_val - t0
+
+            can_id = int(m.group("id"), 16)
+            data_hex = m.group("data")
+            if not data_hex:
+                continue
+            payload = bytes.fromhex(data_hex)
+
+            msg_def = msgs_by_id.get(can_id)
+            if not msg_def:
+                continue
+
+            try:
+                decoded = msg_def.decode(payload, decode_choices=False, scaling=True, allow_truncated=True)
+            except Exception:
+                continue
+
+            vals: dict[str, float] = {}
+
+            # Tratamiento especial para arrays de cámaras térmicas TW1..TW4
+            if can_id in tire_temp_ids:
+                tw_vals = [float(v) for k, v in decoded.items() if k.startswith("TW") and np.isfinite(v)]
+                if tw_vals:
+                    vals[tire_temp_ids[can_id]] = float(np.mean(tw_vals))
+
+            for sig_name, val in decoded.items():
+                canon = resolve_channel_name(sig_name)
+                try:
+                    vals[canon] = float(val)
+                except (ValueError, TypeError):
+                    continue
+
+            if vals:
+                asm.push(t_rel, vals, out_t, out_rows)
+
+    if not out_t:
+        raise ValueError(f"{path.name}: No se pudieron decodificar tramas CAN válidas con {dbc.name}")
+
+    t_arr = np.asarray(out_t, dtype=float)
+    data_mat = np.asarray(out_rows).T
+
+    # Descartar canales que hayan quedado completamente en NaN
+    channels: dict[str, np.ndarray] = {}
+    for i, name in enumerate(asm.names):
+        col = data_mat[i]
+        if np.isfinite(col).any():
+            channels[name] = col
+
+    return LogData(t_arr, channels, fs, path, {"format": "candump", "dbc": dbc.name})
+
+_LOADERS = {
+    ".mf4": load_mf4,
+    ".mdf": load_mf4,
+    ".csv": load_csv,
+    ".npz": load_npz,
+    ".mat": load_mat,
+    ".log": load_candump,
+    ".asc": load_candump,
+}
 
 def load_log(path: str | Path, fs: float = FS_DEFAULT) -> LogData:
     p = Path(path)

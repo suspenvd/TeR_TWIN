@@ -1,35 +1,28 @@
 #!/usr/bin/env python3
 """apps/desktop/views/telemetry_view.py
-TeR-Twin Studio · Telemetry Analysis workstation (MoTeC i2 Pro style).
+TeR-Twin Studio · Telemetry workstation (MoTeC i2 Pro / Bloomberg-terminal aesthetic).
 
-Offline analysis (.mf4 .mdf .csv .npz .mat) and live 200 Hz CAN streaming, 3 workspaces:
-  left   : reconstructed 2D track map (speed/ay/brake heat ribbon, sector gates, animated car) + delta-t strip
-  center : 4 stacked, x-linked strip charts + master scrubbar, crosshair with live numeric readouts
-  right  : G-G diagram (+ friction ellipses of the active tyres), damper-velocity histograms, diagnostics
+Layout: [track map | delta-T | sector matrix]  [4 linked strips w/ 20 px header banners + scrub bar]
+        [G-G + MF6.1 boundary | damper-velocity histograms | diagnostics watchdog grid]
 
 Assumptions (explicit)
 ----------------------
-* Backend contract = ``ter_twin.telemetry``. ``CORNER_COLORS`` and the helpers ``gps_to_local``, ``cumtrapz``,
-  ``damper_velocity``, ``fill_nan`` are NOT re-exported by ``ter_twin.telemetry.__init__``; they are imported from
-  ``channel_definitions`` / ``math_channels`` directly.
-* All file IO, math-channel computation, lap detection and friction-ellipse (JAX) evaluation run in daemon
-  threads; results return through a ``queue.SimpleQueue`` drained by the 33 ms Tk poll. The Tk thread never
-  touches sockets or files.
-* Cursor/scrub/playback are sample-index based on the 200 Hz grid. X axis = time since segment start (offline)
-  or absolute log time (live); lap-distance mode uses the trapezoid distance of ``LapAnalyzer`` (offline only).
-* Track reconstruction: GPS (``gps_to_local``) when its spread is > 5 m; otherwise per-lap dead reckoning
-  with (1) yaw-rate bias removal so the heading integral closes to n*2*pi and (2) a linear residual closure.
-  "Session" view without GPS is raw (drifting) odometry. Live view uses the math-channel ``track_x/track_y``.
-* Delta-t uses ``LapAnalyzer.delta_time``. The best valid lap is auto-selected as view lap and reference.
-* Damper bins (mm/s): LSC [0,50], HSC >50, LSR [-50,0), HSR <-50; zero velocity counts as LSC.
-* Watchdog thresholds are engineering assumptions (amber/red): min cell < 3.30/3.00 V, SoC < 20/10 %,
-  inverter > 85/100 degC, motor > 110/125 degC, accumulator power > 72/80 kW.
-* G-G ellipses come from ``friction_ellipses_g`` (40 and 90 km/h) with the tyres published by the Tyre view
-  (``front_tyre_params`` / ``rear_tyre_params``); the braking-limit semi-axis is mirrored (accel is
-  powertrain-limited, not shown). Without published tyres the nominal ``MF61Params()`` is used.
-* Live DBC: ``config/can/dbc/TER.dbc``. ``Replay demo`` feeds the ring buffer from ``make_demo_log`` (no hardware).
-* Blitting: cursors, readouts, blips and the G-G trail are animated artists; data lines redraw only on
-  data / zoom / pan changes. Lines are updated with ``set_data`` (no ``clf``), min-max decimated to <= 2000 pts.
+* No matplotlib navigation toolbar. Zoom/pan are implemented on the canvases: wheel = zoom at cursor,
+  left click/drag = scrub, right drag = box-zoom, middle drag = pan, double click = reset.
+* Each strip is its own Figure/canvas (so a Tk header bar can sit directly above it). X-limits are linked via
+  ``xlim_changed`` with a re-entrancy guard instead of ``sharex`` (shared axes across figures would force redraws
+  of every canvas on each limit change).
+* Tyre-temperature harness swap (logged RL=physical FR, logged FR=physical RL) is applied ONCE inside
+  ``resolve_channel_name`` by every loader/decoder. This view consumes canonical ``tire_temp_{fl,fr,rl,rr}`` and
+  never swaps again (re-swapping would undo the fix).
+* All IO, math-channel evaluation and JAX friction-ellipse evaluation run in daemon threads; results return via a
+  ``queue.SimpleQueue`` drained by the 30 ms Tk tick. The Tk thread never touches sockets/files.
+* Decimation: vectorised min-max (peak preserving) for strips, LTTB for delta-T / ghost (single line, finite).
+* MF6.1 boundary: ``friction_ellipses_g`` evaluated at the cursor speed quantised to 5 km/h, cached; the ellipse is
+  the single-load-sensitive-mu reference (no load transfer / combined slip). Braking semi-axis mirrored.
+* Watchdog thresholds (amber/red) are engineering assumptions: min cell 3.20/3.00 V, SoC 20/10 %, inverter 85/100 C,
+  motor 110/125 C, accumulator > 80 kW flashes red. Damper bins (mm/s): LSC [0,50], HSC >50, LSR [-50,0), HSR <-50.
+* Track reconstruction: GPS when spread > 5 m, otherwise yaw-bias-corrected, loop-closed dead reckoning per lap.
 """
 from __future__ import annotations
 
@@ -40,9 +33,10 @@ import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from typing import Any, Optional
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -55,68 +49,93 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("TkAgg")
 from matplotlib.artist import Artist  # noqa: E402
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk  # noqa: E402
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.collections import LineCollection  # noqa: E402
-from matplotlib.colors import Normalize  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
-from matplotlib.patches import Ellipse  # noqa: E402
+from matplotlib.patches import Circle, Ellipse, Rectangle  # noqa: E402
 from matplotlib.transforms import blended_transform_factory  # noqa: E402
 
 from apps.desktop.state import AppState  # noqa: E402
-from apps.desktop.theme import (  # noqa: E402
-    ACCENT_AMBER, ACCENT_BLUE, ACCENT_GREEN, ACCENT_RED, BG_CARD, BG_DARK, BG_HOVER, BORDER,
-    TEXT_BRIGHT, TEXT_MUTED, TEXT_PRIMARY,
-)
 from apps.desktop.views.base_view import BaseView  # noqa: E402
 from ter_twin.telemetry import (  # noqa: E402
     CORNERS, POWER_LIMIT_KW, RAW_CHANNELS, CanIngest, Lap, LapAnalyzer, LogData, ReplayIngest, RingBuffer,
-    compute_math_channels, format_lap_time, friction_ellipses_g, get_spec, load_log, make_demo_log,
-    minmax_indices,
+    compute_math_channels, decimate_indices, format_lap_time, friction_ellipses_g, get_spec, load_log,
+    make_demo_log, minmax_indices,
 )
-from ter_twin.telemetry.channel_definitions import CORNER_COLORS  # noqa: E402
 from ter_twin.telemetry.math_channels import cumtrapz, damper_velocity, fill_nan, gps_to_local  # noqa: E402
 
 __all__ = ["TelemetryView"]
 LOG = logging.getLogger("telemetry_view")
 
-TXT = "#e6edf3"
-POLL_MS = 33
+# ---------------------------------------------------------------------------------------------- palette
+K_BLACK, K_PLOT = "#030507", "#06080c"
+K_CARD, K_CARD2 = "#0d1117", "#11141c"
+K_LINE, K_LINE2, K_GRID = "#1e2430", "#1a1f2b", "#161b24"
+K_TXT, K_DIM, K_BRIGHT, K_ACCENT, K_SEL = "#c9d1d9", "#6e7681", "#e6edf3", "#58a6ff", "#1f3a5f"
+GREEN, RED, AMBER, CYAN = "#00e676", "#ff1744", "#ffab00", "#00e5ff"
+COBALT, ORANGE, MAGENTA, WHITE = "#2979ff", "#ff6d00", "#e040fb", "#ffffff"
+WHEEL_COL = {"fl": "#00b0ff", "fr": "#ff5252", "rl": "#69f0ae", "rr": "#e040fb"}
+MONO_CANDIDATES = ("JetBrains Mono", "Roboto Mono", "Consolas", "Menlo", "DejaVu Sans Mono", "Courier New")
+
+POLL_MS = 30
 FS = 200.0
 MAX_PTS = 2000
 LIVE_CAPACITY = 120_000
 DBC_PATH = _ROOT / "config" / "can" / "dbc" / "TER.dbc"
 HEAT_CHANNELS = ("vx", "ay", "brake_press_front", "ax", "throttle_pct", "battery_power_kw", "yaw_rate")
-HIST_LABELS = ("HSR", "LSR", "LSC", "HSC")
-HIST_COLORS = ("#d29922", "#f0883e", "#58a6ff", "#1f6feb")
+CMAPS: dict[str, Any] = {
+    "slate-cyan": LinearSegmentedColormap.from_list("slate_cyan", ["#1c2733", "#2b6a8a", CYAN]),
+    "viridis": "viridis", "plasma": "plasma",
+}
+HIST_LABELS = ("LSC", "HSC", "LSR", "HSR")
+HIST_COLORS = ("#1f5fbf", COBALT, "#a36a00", AMBER)
 _OFF_KEYS = ("_t", "_ch", "_dist", "_an", "_laps", "_best", "_lap_sel", "_ref", "_seg", "_xs", "_ci",
              "_log_name", "_fs", "_gps")
 
 
-def _corner(fmt: str, short: str) -> tuple[tuple[str, str], ...]:
-    return tuple((fmt.format(c), f"{short} {c.upper()}") for c in CORNERS)
+class Ch(NamedTuple):
+    key: str
+    short: str
+    color: str
+    ls: str = "-"
+    lw: float = 0.9
+    fill: bool = False
 
 
-STRIPS: tuple[dict[str, Any], ...] = (
-    dict(L=(("vx", "Speed"), ("brake_press_front", "BrkF"), ("throttle_pct", "Thr")),
-         R=(("battery_power_kw", "Pwr"),), yl="km/h · bar · %", yr="kW"),
-    dict(L=(("ay", "Ay"), ("ax", "Ax")), R=(("steer_angle", "Steer"), ("yaw_rate", "Yaw")),
-         yl="g", yr="deg · deg/s"),
-    dict(L=_corner("wheel_speed_{}", "WS"), R=_corner("slip_ratio_{}", "SR"), yl="km/h", yr="slip %"),
-    dict(L=_corner("damper_travel_{}", "DT"), R=_corner("tire_temp_{}", "TT"), yl="mm", yr="°C"),
+class Strip(NamedTuple):
+    title: str
+    left: tuple[Ch, ...]
+    right: tuple[Ch, ...]
+    yl: str
+    yr: str
+    units: bool
+    ghost: str | None
+
+
+def _wheel(fmt: str, short: str, ls: str = "-", lw: float = 0.85) -> tuple[Ch, ...]:
+    return tuple(Ch(fmt.format(c), f"{short}{c.upper()}", WHEEL_COL[c], ls, lw) for c in CORNERS)
+
+
+STRIPS: tuple[Strip, ...] = (
+    Strip("SPEED·ENERGY",
+          (Ch("vx", "vx", CYAN, "-", 1.0), Ch("throttle_pct", "Throt", GREEN, "-", 0.85),
+           Ch("brake_press_front", "BrkF", RED, "-", 0.9, True), Ch("brake_press_rear", "BrkR", "#a3283f", "--", 0.7)),
+          (Ch("battery_power_kw", "P_batt", AMBER, "-", 1.0),), "km/h · % · bar", "kW", True, "vx"),
+    Strip("CHASSIS",
+          (Ch("ay", "ay", COBALT, "-", 0.9), Ch("ax", "ax", WHITE, "-", 0.8)),
+          (Ch("steer_angle", "Steer", ORANGE, "-", 0.9), Ch("yaw_rate", "Yaw", MAGENTA, "-", 0.85)),
+          "g", "deg · deg/s", True, "ay"),
+    Strip("WHEELS km/h│κ %", _wheel("wheel_speed_{}", "WS"), _wheel("slip_ratio_{}", "κ", "--", 0.75),
+          "km/h", "slip %", False, None),
+    Strip("SUSP mm│TIRE °C", _wheel("damper_travel_{}", "DT"), _wheel("tire_temp_{}", "TT", "-.", 0.75),
+          "mm", "°C", False, None),
 )
 
 
-def _fmt(key: str, v: float) -> str:
-    return "--" if v is None or not np.isfinite(v) else f"{v:.{get_spec(key).precision}f}"
-
-
-def _style(ax: Any, grid: bool = True) -> None:
-    ax.set_facecolor(BG_CARD)
-    for s in ax.spines.values():
-        s.set_color(BORDER)
-    ax.tick_params(colors=TEXT_MUTED, labelsize=7, length=2)
-    if grid:
-        ax.grid(True, color=BG_HOVER, lw=0.6, alpha=0.9)
+def _pick_mono(root: tk.Misc) -> str:
+    fams = set(tkfont.families(root))
+    return next((f for f in MONO_CANDIDATES if f in fams), "TkFixedFont")
 
 
 def _nanfn(fn: Any, arr: Any) -> float:
@@ -126,11 +145,10 @@ def _nanfn(fn: Any, arr: Any) -> float:
 
 
 class _Blit:
-    """Blitting helper: animated artists are repainted over a cached clean background."""
+    """Animated artists are repainted over a cached clean background (no full redraw per cursor move)."""
 
     def __init__(self, canvas: FigureCanvasTkAgg) -> None:
-        self.canvas = canvas
-        self.fig = canvas.figure
+        self.canvas, self.fig = canvas, canvas.figure
         self.bg: Any = None
         self.artists: list[Artist] = []
         canvas.mpl_connect("draw_event", self._on_draw)
@@ -140,7 +158,7 @@ class _Blit:
             a.set_animated(True)
             self.artists.append(a)
 
-    def _on_draw(self, _event: Any) -> None:
+    def _on_draw(self, _e: Any) -> None:
         self.bg = self.canvas.copy_from_bbox(self.fig.bbox)
         self._paint()
 
@@ -164,91 +182,99 @@ class TelemetryView(BaseView):
     def __init__(self, parent: tk.Widget, app_state: AppState, **kwargs: Any) -> None:
         super().__init__(parent, app_state, **kwargs)
         self._q: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
-        self._poll_id: Optional[str] = None
-        self._deb_id: Optional[str] = None
+        self._poll_id: str | None = None
+        self._deb_id: str | None = None
         self._active = False
         self._mode = "offline"
-        self._busy = False                      # guards programmatic xlim changes
+        self._busy = False
         self._tick_n = 0
-        # data
         self._t = np.zeros(0)
         self._ch: dict[str, np.ndarray] = {}
         self._dist = np.zeros(0)
-        self._an: Optional[LapAnalyzer] = None
+        self._an: LapAnalyzer | None = None
         self._laps: list[Lap] = []
-        self._best: Optional[Lap] = None
-        self._lap_sel: Optional[Lap] = None
-        self._ref: Optional[Lap] = None
+        self._best: Lap | None = None
+        self._lap_sel: Lap | None = None
+        self._ref: Lap | None = None
         self._seg = (0, 0)
         self._xs = np.zeros(0)
         self._ci = 0
         self._log_name = "—"
         self._fs = FS
-        self._gps: Optional[tuple[np.ndarray, np.ndarray]] = None
-        self._stash: Optional[dict[str, Any]] = None
+        self._gps: tuple[np.ndarray, np.ndarray] | None = None
+        self._stash: dict[str, Any] | None = None
         self._map_x = np.zeros(0)
         self._map_y = np.zeros(0)
         self._map_decor: list[Artist] = []
-        self._ell_patches: list[Artist] = []
         self._loading = False
-        # playback
         self._playing = False
         self._play_wall = 0.0
         self._play_t = 0.0
-        self._scrub_lock = False
-        self._blink = 0
-        # live
-        self._buffer: Optional[RingBuffer] = None
+        self._buffer: RingBuffer | None = None
         self._ingest: Any = None
-        self._math_cache: Optional[tuple[np.ndarray, dict[str, np.ndarray]]] = None
+        self._math_cache: tuple[np.ndarray, dict[str, np.ndarray]] | None = None
         self._math_busy = False
         self._last_math = 0.0
         self._live_frozen = False
         self._live_n = 0
-        self._ell_busy = False
-        self._ell_dirty = False
         self._last_ms = 0.0
+        self._ell_cache: dict[int, tuple[float, float]] = {}
+        self._ell_pending: set[int] = set()
+        self._ghost_cache: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+        self._key_ids: list[tuple[str, str]] = []
+        self._drag: dict[str, Any] | None = None
+        self._flash = False
 
     # ------------------------------------------------------------------ lifecycle
     def on_mount(self) -> None:
+        mono = _pick_mono(self)
+        self._f8 = (mono, 8)
+        self._f8b = (mono, 8, "bold")
+        self._f12 = (mono, 12, "bold")
         self.v_mode = tk.StringVar(value="offline")
         self.v_xmode = tk.StringVar(value="time")
         self.v_lap = tk.StringVar()
         self.v_isref = tk.BooleanVar(value=False)
         self.v_speed = tk.StringVar(value="1.0x")
-        self.v_play = tk.StringVar(value="▶")
+        self.v_play = tk.StringVar(value="PLAY")
         self.v_heat = tk.StringVar(value="vx")
-        self.v_cmap = tk.StringVar(value="turbo")
+        self.v_cmap = tk.StringVar(value="slate-cyan")
         self.v_src = tk.StringVar(value="socketcan")
         self.v_chan = tk.StringVar(value="vcan0")
         self.v_win = tk.StringVar(value="30 s")
-        self.v_badge = tk.StringVar(value="no log loaded")
-        self.v_hud = tk.StringVar(value="— Hz · 0 frames · 0 dropped")
-        self.v_fill = tk.DoubleVar(value=0.0)
-        self.v_conn = tk.StringVar(value="Connect")
-        self.v_ref_lbl = tk.StringVar(value="Ref: —")
-        self.v_s_log = tk.StringVar(value="Log: —")
-        self.v_s_fs = tk.StringVar(value="fs: — Hz")
-        self.v_s_cur = tk.StringVar(value="cursor: —")
-        self.v_s_rate = tk.StringVar(value="packets: — Hz")
-        self.v_s_fill = tk.StringVar(value="buffer: —")
+        self.v_badge = tk.StringVar(value="NO LOG")
+        self.v_best = tk.StringVar(value="")
+        self.v_ref_lbl = tk.StringVar(value="REF —")
+        self.v_conn = tk.StringVar(value="CONNECT")
+        self.v_rate = tk.StringVar(value="OFFLINE")
+        self.v_frames = tk.StringVar(value="FRM 0")
+        self.v_drop = tk.StringVar(value="DROP 0")
         self.v_scrub = tk.StringVar(value="")
+        self.v_s_buf = tk.StringVar(value="BUF —")
+        self.v_s_hz = tk.StringVar(value="FS — Hz")
+        self.v_s_cur = tk.StringVar(value="CUR —")
+        self.v_s_loss = tk.StringVar(value="LOSS 0")
+        self.v_s_file = tk.StringVar(value="FILE —")
+        self.v_map_hdr = tk.StringVar(value="")
+        self.v_dt_hdr = tk.StringVar(value="")
+        self.v_gg_hdr = tk.StringVar(value="")
         self._build_toolbar()
         self._build_statusbar()
         self._build_body()
         self.bind("<Destroy>", self._on_destroy, add="+")
-        self._start_ellipse_worker()
 
     def on_activate(self) -> None:
         self._do_mount()
         self._active = True
+        self._bind_keys()
         self._draw_all()
         if self._poll_id is None:
-            self._poll_id = self.after(POLL_MS, self._poll_tick)
+            self._poll_id = self.after(POLL_MS, self._render_tick)
 
     def on_deactivate(self) -> None:
         self._active = False
         self._pause()
+        self._unbind_keys()
         for attr in ("_poll_id", "_deb_id"):
             aid = getattr(self, attr)
             if aid is not None:
@@ -261,13 +287,15 @@ class TelemetryView(BaseView):
 
     def on_state_change(self, key: str, value: Any) -> None:
         if self._mounted and key in ("front_tyre_params", "rear_tyre_params"):
-            self._start_ellipse_worker()
+            self._ell_cache.clear()
+            self._ell_pending.clear()
 
     def _on_destroy(self, event: tk.Event) -> None:
         if event.widget is not self:
             return
         self._active = False
         self._disconnect_live()
+        self._unbind_keys()
         for attr in ("_poll_id", "_deb_id"):
             aid = getattr(self, attr)
             if aid is not None:
@@ -277,116 +305,163 @@ class TelemetryView(BaseView):
                     pass
                 setattr(self, attr, None)
 
-    # ------------------------------------------------------------------ toolbar
+    # ------------------------------------------------------------------ widget helpers
+    def _btn(self, parent: tk.Widget, text: str | None, cmd: Any, textvariable: tk.StringVar | None = None,
+             width: int | None = None) -> tk.Button:
+        return tk.Button(parent, text=text, textvariable=textvariable, command=cmd, bg=K_CARD2, fg=K_TXT,
+                         activebackground=K_LINE, activeforeground=K_BRIGHT, relief="flat", bd=0,
+                         highlightthickness=1, highlightbackground=K_LINE, highlightcolor=K_LINE, padx=8, pady=2,
+                         font=self._f8b, cursor="hand2", takefocus=0, width=width)
+
+    def _seg_btn(self, parent: tk.Widget, text: str, value: str, var: tk.StringVar, cmd: Any) -> tk.Radiobutton:
+        return tk.Radiobutton(parent, text=text, value=value, variable=var, command=cmd, indicatoron=False,
+                              bg=K_CARD2, fg=K_TXT, selectcolor=K_SEL, activebackground=K_LINE,
+                              activeforeground=K_BRIGHT, relief="flat", bd=0, highlightthickness=1,
+                              highlightbackground=K_LINE, padx=10, pady=2, font=self._f8b, cursor="hand2",
+                              takefocus=0)
+
+    def _label(self, parent: tk.Widget, var: tk.StringVar | None = None, text: str = "", fg: str = K_TXT,
+               font: Any = None, **kw: Any) -> tk.Label:
+        return tk.Label(parent, textvariable=var, text=text, bg=kw.pop("bg", K_CARD), fg=fg,
+                        font=font or self._f8, **kw)
+
+    def _panel_header(self, parent: tk.Widget, title: str, var: tk.StringVar | None = None) -> tk.Frame:
+        f = tk.Frame(parent, bg=K_CARD, height=20, highlightbackground=K_LINE, highlightthickness=1)
+        f.pack_propagate(False)
+        self._label(f, text=title, fg=K_ACCENT, font=self._f8b).pack(side="left", padx=(6, 8))
+        if var is not None:
+            self._label(f, var, fg=K_DIM).pack(side="left")
+        return f
+
+    @staticmethod
+    def _canvas(parent: tk.Widget, fig: Figure) -> tuple[FigureCanvasTkAgg, _Blit]:
+        cv = FigureCanvasTkAgg(fig, master=parent)
+        w = cv.get_tk_widget()
+        w.configure(bg=K_BLACK, highlightthickness=0, bd=0)
+        w.pack(fill="both", expand=True)
+        return cv, _Blit(cv)
+
+    def _style_ax(self, ax: Any, grid: bool = True) -> None:
+        ax.set_facecolor(K_PLOT)
+        for s in ax.spines.values():
+            s.set_color(K_LINE)
+            s.set_linewidth(0.8)
+        ax.tick_params(colors=K_DIM, labelsize=6.5, length=2, width=0.6)
+        try:
+            ax.tick_params(labelfontfamily=list(MONO_CANDIDATES))
+        except (AttributeError, TypeError, ValueError):
+            pass
+        if grid:
+            ax.grid(True, color=K_GRID, lw=0.5, ls=":", alpha=0.6)
+
+    # ------------------------------------------------------------------ top command & HUD strip
     def _build_toolbar(self) -> None:
-        bar = tk.Frame(self, bg=BG_CARD)
+        bar = tk.Frame(self, bg=K_CARD, highlightbackground=K_LINE, highlightthickness=1)
         bar.pack(side="top", fill="x")
-        r1 = tk.Frame(bar, bg=BG_CARD)
-        r1.pack(fill="x", padx=6, pady=(5, 2))
-        r2 = tk.Frame(bar, bg=BG_CARD)
-        r2.pack(fill="x", padx=6, pady=(2, 5))
-        tk.Frame(bar, bg=BORDER, height=1).pack(fill="x")
+        r1 = tk.Frame(bar, bg=K_CARD)
+        r1.pack(fill="x", padx=6, pady=(4, 2))
+        r2 = tk.Frame(bar, bg=K_CARD)
+        r2.pack(fill="x", padx=6, pady=(2, 4))
 
-        seg = tk.Frame(r1, bg=BORDER)
+        seg = tk.Frame(r1, bg=K_LINE)
         seg.pack(side="left", padx=(0, 10))
-        for txt, val in (("OFFLINE LOG ANALYSIS", "offline"), ("LIVE CAN STREAM", "live")):
-            tk.Radiobutton(seg, text=txt, value=val, variable=self.v_mode, indicatoron=False, command=self._on_mode,
-                           bg=BG_HOVER, fg=TEXT_PRIMARY, selectcolor="#1f6feb", activebackground=BG_HOVER,
-                           activeforeground=TEXT_BRIGHT, relief="flat", bd=0, padx=12, pady=4, highlightthickness=0,
-                           font=("Segoe UI", 8, "bold"), cursor="hand2").pack(side="left", padx=(0, 1), pady=1)
+        self._seg_btn(seg, "OFFLINE ANALYSIS", "offline", self.v_mode, self._on_mode).pack(side="left", padx=(0, 1))
+        self._seg_btn(seg, "LIVE CAN STREAM", "live", self.v_mode, self._on_mode).pack(side="left")
 
-        self._slot = tk.Frame(r1, bg=BG_CARD)
+        self._slot = tk.Frame(r1, bg=K_CARD)
         self._slot.pack(side="left")
-        self._grp_off = tk.Frame(self._slot, bg=BG_CARD)
-        ttk.Button(self._grp_off, text="Open Log…", command=self._open_log).pack(side="left")
-        ttk.Button(self._grp_off, text="Load Demo", command=lambda: self._load_async(None)).pack(side="left", padx=3)
-        tk.Label(self._grp_off, textvariable=self.v_badge, bg=BG_HOVER, fg=ACCENT_BLUE, padx=8, pady=3,
-                 font=("Consolas", 8)).pack(side="left", padx=4)
+        self._grp_off = tk.Frame(self._slot, bg=K_CARD)
+        self._btn(self._grp_off, "OPEN LOG…", self._open_log).pack(side="left")
+        self._btn(self._grp_off, "LOAD DEMO", lambda: self._load_async(None)).pack(side="left", padx=2)
+        self._btn(self._grp_off, "DEMO REPLAY", self._replay_demo).pack(side="left")
+        self._label(self._grp_off, self.v_badge, fg=K_ACCENT, padx=8).pack(side="left")
         self._grp_off.pack(side="left")
-        self._grp_live = tk.Frame(self._slot, bg=BG_CARD)
-        self._cb_src = ttk.Combobox(self._grp_live, textvariable=self.v_src, state="readonly", width=10,
-                                    values=("socketcan", "serial", "udp"))
-        self._cb_src.pack(side="left")
-        self._cb_src.bind("<<ComboboxSelected>>", self._on_src)
-        ttk.Entry(self._grp_live, textvariable=self.v_chan, width=16).pack(side="left", padx=3)
-        ttk.Button(self._grp_live, textvariable=self.v_conn, command=self._toggle_connect, width=10).pack(side="left")
-        ttk.Button(self._grp_live, text="Replay demo", command=self._replay_demo).pack(side="left", padx=3)
-        ttk.Label(self._grp_live, text="Window").pack(side="left", padx=(8, 2))
-        ttk.Combobox(self._grp_live, textvariable=self.v_win, state="readonly", width=6,
+        self._grp_live = tk.Frame(self._slot, bg=K_CARD)
+        cb = ttk.Combobox(self._grp_live, textvariable=self.v_src, state="readonly", width=10, font=self._f8,
+                          values=("socketcan", "serial", "udp"))
+        cb.pack(side="left")
+        cb.bind("<<ComboboxSelected>>", self._on_src)
+        ttk.Entry(self._grp_live, textvariable=self.v_chan, width=16, font=self._f8).pack(side="left", padx=3)
+        self._btn(self._grp_live, None, self._toggle_connect, textvariable=self.v_conn, width=11).pack(side="left")
+        self._btn(self._grp_live, "DEMO REPLAY", self._replay_demo).pack(side="left", padx=3)
+        self._label(self._grp_live, text="WINDOW", fg=K_DIM).pack(side="left", padx=(8, 2))
+        ttk.Combobox(self._grp_live, textvariable=self.v_win, state="readonly", width=6, font=self._f8,
                      values=("10 s", "30 s", "60 s", "120 s")).pack(side="left")
 
-        ttk.Label(r1, text="  Lap").pack(side="left", padx=(12, 2))
-        self._cb_lap = ttk.Combobox(r1, textvariable=self.v_lap, state="readonly", width=40)
+        self._label(r1, text="LAP", fg=K_DIM).pack(side="left", padx=(14, 2))
+        self._cb_lap = ttk.Combobox(r1, textvariable=self.v_lap, state="readonly", width=46, font=self._f8)
         self._cb_lap.pack(side="left")
         self._cb_lap.bind("<<ComboboxSelected>>", self._on_lap_select)
-        tk.Checkbutton(r1, text="Set Reference Lap", variable=self.v_isref, indicatoron=False, command=self._toggle_ref,
-                       bg=BG_HOVER, fg=TEXT_PRIMARY, selectcolor="#1f6feb", activebackground=BG_HOVER,
-                       relief="flat", padx=8, pady=3, highlightthickness=0, font=("Segoe UI", 8),
-                       cursor="hand2").pack(side="left", padx=6)
-        tk.Label(r1, textvariable=self.v_ref_lbl, bg=BG_CARD, fg=ACCENT_AMBER, font=("Consolas", 8)).pack(side="left")
-        self._rb_x: list[tk.Radiobutton] = []
-        for txt, val in (("Time [s]", "time"), ("Lap Distance [m]", "dist")):
-            rb = tk.Radiobutton(r1, text=txt, value=val, variable=self.v_xmode, indicatoron=False,
-                                command=self._on_xmode, bg=BG_HOVER, fg=TEXT_PRIMARY, selectcolor="#1f6feb",
-                                activebackground=BG_HOVER, relief="flat", padx=8, pady=3, highlightthickness=0,
-                                font=("Segoe UI", 8), cursor="hand2")
-            rb.pack(side="right", padx=1)
-            self._rb_x.append(rb)
+        self._label(r1, self.v_best, fg=GREEN, font=self._f8b, padx=6).pack(side="left")
+        tk.Checkbutton(r1, text="SET REFERENCE LAP", variable=self.v_isref, indicatoron=False, command=self._toggle_ref,
+                       bg=K_CARD2, fg=K_TXT, selectcolor=K_SEL, activebackground=K_LINE, relief="flat", bd=0,
+                       highlightthickness=1, highlightbackground=K_LINE, padx=8, pady=2, font=self._f8b,
+                       cursor="hand2", takefocus=0).pack(side="left", padx=4)
+        self._label(r1, self.v_ref_lbl, fg=AMBER).pack(side="left")
+        xs = tk.Frame(r1, bg=K_LINE)
+        xs.pack(side="right")
+        self._seg_btn(xs, "LAP DISTANCE [m]", "dist", self.v_xmode, self._on_xmode).pack(side="right", padx=(1, 0))
+        self._seg_btn(xs, "TIME [s]", "time", self.v_xmode, self._on_xmode).pack(side="right")
 
         for txt, fn in (("|<", lambda: self._jump(False)), ("<", lambda: self._step(-0.05))):
-            ttk.Button(r2, text=txt, width=3, command=fn).pack(side="left")
-        ttk.Button(r2, textvariable=self.v_play, width=4, command=self._toggle_play).pack(side="left", padx=2)
+            self._btn(r2, txt, fn, width=3).pack(side="left", padx=(0, 1))
+        self._btn(r2, None, self._toggle_play, textvariable=self.v_play, width=6).pack(side="left", padx=1)
         for txt, fn in ((">", lambda: self._step(0.05)), (">|", lambda: self._jump(True))):
-            ttk.Button(r2, text=txt, width=3, command=fn).pack(side="left")
-        ttk.Combobox(r2, textvariable=self.v_speed, state="readonly", width=6,
+            self._btn(r2, txt, fn, width=3).pack(side="left", padx=1)
+        ttk.Combobox(r2, textvariable=self.v_speed, state="readonly", width=6, font=self._f8,
                      values=("0.25x", "0.5x", "1.0x", "2.0x", "5.0x", "10.0x")).pack(side="left", padx=6)
-        ttk.Label(r2, text="Track colour").pack(side="left", padx=(14, 2))
-        cb = ttk.Combobox(r2, textvariable=self.v_heat, state="readonly", width=16, values=HEAT_CHANNELS)
-        cb.pack(side="left")
-        cb.bind("<<ComboboxSelected>>", lambda _e: self._on_heat())
-        cb2 = ttk.Combobox(r2, textvariable=self.v_cmap, state="readonly", width=9,
-                           values=("turbo", "coolwarm", "viridis"))
-        cb2.pack(side="left", padx=3)
-        cb2.bind("<<ComboboxSelected>>", lambda _e: self._on_heat())
+        self._label(r2, text="TRACK COLOUR", fg=K_DIM).pack(side="left", padx=(14, 2))
+        c1 = ttk.Combobox(r2, textvariable=self.v_heat, state="readonly", width=16, font=self._f8,
+                          values=HEAT_CHANNELS)
+        c1.pack(side="left")
+        c1.bind("<<ComboboxSelected>>", lambda _e: self._on_heat())
+        c2 = ttk.Combobox(r2, textvariable=self.v_cmap, state="readonly", width=10, font=self._f8,
+                          values=tuple(CMAPS))
+        c2.pack(side="left", padx=3)
+        c2.bind("<<ComboboxSelected>>", lambda _e: self._on_heat())
 
-        hud = tk.Frame(r2, bg=BG_HOVER)
+        hud = tk.Frame(r2, bg=K_CARD2, highlightbackground=K_LINE, highlightthickness=1)
         hud.pack(side="right")
-        tk.Label(hud, text="INGEST", bg=BG_HOVER, fg=TEXT_MUTED, font=("Segoe UI", 7, "bold")).pack(side="left", padx=(8, 4))
-        tk.Label(hud, textvariable=self.v_hud, bg=BG_HOVER, fg=ACCENT_GREEN, font=("Consolas", 8)).pack(side="left")
-        ttk.Progressbar(hud, variable=self.v_fill, maximum=100.0, length=90).pack(side="left", padx=8, pady=3)
+        self._lbl_rate = self._label(hud, self.v_rate, fg=K_DIM, font=self._f8b, bg=K_CARD2, width=10, padx=6)
+        self._lbl_rate.pack(side="left")
+        self._label(hud, self.v_frames, fg=K_TXT, bg=K_CARD2, width=14).pack(side="left")
+        self._label(hud, self.v_drop, fg=K_TXT, bg=K_CARD2, width=10).pack(side="left")
+        self._fill_cv = tk.Canvas(hud, width=80, height=8, bg=K_BLACK, highlightthickness=1,
+                                  highlightbackground=K_LINE)
+        self._fill_cv.pack(side="left", padx=8, pady=3)
 
     def _build_statusbar(self) -> None:
-        bar = tk.Frame(self, bg=BG_HOVER)
+        bar = tk.Frame(self, bg=K_CARD, height=20, highlightbackground=K_LINE, highlightthickness=1)
         bar.pack(side="bottom", fill="x")
-        for var, col in ((self.v_s_log, ACCENT_BLUE), (self.v_s_fs, TEXT_MUTED), (self.v_s_cur, TXT),
-                         (self.v_s_rate, ACCENT_GREEN), (self.v_s_fill, TEXT_MUTED)):
-            tk.Label(bar, textvariable=var, bg=BG_HOVER, fg=col, font=("Consolas", 8), padx=10).pack(side="left")
+        for var, col in ((self.v_s_buf, K_TXT), (self.v_s_hz, GREEN), (self.v_s_cur, K_BRIGHT),
+                         (self.v_s_loss, K_TXT), (self.v_s_file, K_ACCENT)):
+            self._label(bar, var, fg=col, padx=8).pack(side="left")
+            tk.Frame(bar, bg=K_LINE, width=1).pack(side="left", fill="y", pady=3)
 
     # ------------------------------------------------------------------ body
     def _build_body(self) -> None:
-        self._pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, bg=BG_DARK, sashwidth=5, sashrelief="flat",
-                                    bd=0, opaqueresize=True)
+        self._pane = tk.PanedWindow(self, orient=tk.HORIZONTAL, bg=K_LINE, sashwidth=3, bd=0, sashrelief="flat",
+                                    opaqueresize=True)
         self._pane.pack(fill="both", expand=True)
-        left = tk.PanedWindow(self._pane, orient=tk.VERTICAL, bg=BG_DARK, sashwidth=5, bd=0)
-        center = tk.Frame(self._pane, bg=BG_DARK)
-        right = tk.PanedWindow(self._pane, orient=tk.VERTICAL, bg=BG_DARK, sashwidth=5, bd=0)
+        left = tk.PanedWindow(self._pane, orient=tk.VERTICAL, bg=K_LINE, sashwidth=3, bd=0)
+        center = tk.Frame(self._pane, bg=K_BLACK)
+        right = tk.PanedWindow(self._pane, orient=tk.VERTICAL, bg=K_LINE, sashwidth=3, bd=0)
         self._pane.add(left, minsize=240, stretch="always")
-        self._pane.add(center, minsize=500, stretch="always")
+        self._pane.add(center, minsize=520, stretch="always")
         self._pane.add(right, minsize=260, stretch="always")
         self._sash_done = False
         self._pane.bind("<Configure>", self._init_sashes)
 
-        f_map = tk.Frame(left, bg=BG_DARK)
-        f_dt = tk.Frame(left, bg=BG_DARK)
+        f_map, f_dt, f_sec = (tk.Frame(left, bg=K_BLACK) for _ in range(3))
         left.add(f_map, minsize=200, stretch="always")
         left.add(f_dt, minsize=120, stretch="always")
+        left.add(f_sec, minsize=110, stretch="never")
         self._build_map(f_map)
         self._build_delta(f_dt)
+        self._build_sectors(f_sec)
         self._build_strips(center)
-        f_gg = tk.Frame(right, bg=BG_DARK)
-        f_h = tk.Frame(right, bg=BG_DARK)
-        f_d = tk.Frame(right, bg=BG_CARD)
-        right.add(f_gg, minsize=200, stretch="always")
+        f_gg, f_h, f_d = (tk.Frame(right, bg=K_BLACK) for _ in range(3))
+        right.add(f_gg, minsize=220, stretch="always")
         right.add(f_h, minsize=200, stretch="always")
         right.add(f_d, minsize=150, stretch="never")
         self._build_gg(f_gg)
@@ -398,196 +473,246 @@ class TelemetryView(BaseView):
             return
         self._sash_done = True
         try:
-            self._pane.sash_place(0, int(ev.width * 0.20), 0)
-            self._pane.sash_place(1, int(ev.width * 0.75), 0)
+            self._pane.sash_place(0, int(ev.width * 0.22), 0)
+            self._pane.sash_place(1, int(ev.width * 0.76), 0)
         except tk.TclError:
             pass
 
-    @staticmethod
-    def _canvas(parent: tk.Widget, fig: Figure, toolbar: bool = False) -> tuple[FigureCanvasTkAgg, _Blit, Any]:
-        canvas = FigureCanvasTkAgg(fig, master=parent)
-        nav = None
-        if toolbar:
-            nav = NavigationToolbar2Tk(canvas, parent, pack_toolbar=False)
-            nav.config(background=BG_HOVER)
-            for w in nav.winfo_children():
-                try:
-                    w.configure(background=BG_HOVER)
-                except tk.TclError:
-                    pass
-            nav.update()
-            nav.pack(side="bottom", fill="x")
-        w = canvas.get_tk_widget()
-        w.configure(bg=BG_DARK, highlightthickness=0)
-        w.pack(fill="both", expand=True)
-        return canvas, _Blit(canvas), nav
-
     # ---- map
     def _build_map(self, parent: tk.Widget) -> None:
-        fig = Figure(figsize=(3, 3), facecolor=BG_DARK)
+        self._panel_header(parent, "TRACK MAP", self.v_map_hdr).pack(fill="x")
+        fig = Figure(figsize=(3, 3), facecolor=K_BLACK)
         ax = fig.add_axes([0.01, 0.01, 0.98, 0.98])
-        ax.set_facecolor(BG_DARK)
+        ax.set_facecolor(K_BLACK)
         ax.set_axis_off()
         ax.set_aspect("equal", adjustable="datalim")
         self._ax_map = ax
-        self._map_under, = ax.plot([], [], color="#010409", lw=8.5, solid_capstyle="round", zorder=1)
-        self._map_lc = LineCollection([], linewidths=4.0, capstyle="round", zorder=2)
-        self._map_lc.set_cmap("turbo")
+        self._map_lc = LineCollection([], linewidths=1.2, capstyle="butt", zorder=2)
         ax.add_collection(self._map_lc)
-        self._map_txt = ax.text(0.015, 0.012, "", transform=ax.transAxes, fontsize=7, color=TEXT_MUTED, va="bottom")
-        ax.text(0.015, 0.985, "TRACK MAP", transform=ax.transAxes, fontsize=7, color=ACCENT_BLUE, va="top",
-                fontweight="bold")
-        self._blip_glow, = ax.plot([], [], "o", ms=16, color=ACCENT_RED, alpha=0.35, zorder=9)
-        self._blip, = ax.plot([], [], "o", ms=7, color="#ffffff", mec=ACCENT_RED, mew=1.8, zorder=10)
-        self._cv_map, self._bl_map, _ = self._canvas(parent, fig)
-        self._bl_map.add(self._blip_glow, self._blip)
+        self._blip_ring, = ax.plot([], [], "o", ms=4.5, mfc="none", mec=WHITE, mew=0.9, zorder=10)
+        self._blip_dot, = ax.plot([], [], "o", ms=1.6, color=RED, zorder=11)
+        self._blip_vec, = ax.plot([], [], color=WHITE, lw=0.9, solid_capstyle="butt", zorder=10)
+        self._cv_map, self._bl_map = self._canvas(parent, fig)
+        self._bl_map.add(self._blip_ring, self._blip_dot, self._blip_vec)
 
     # ---- delta
     def _build_delta(self, parent: tk.Widget) -> None:
-        fig = Figure(figsize=(3, 2), facecolor=BG_DARK)
-        ax = fig.add_axes([0.16, 0.2, 0.80, 0.68])
-        _style(ax)
-        ax.axhline(0, color=BORDER, lw=0.9)
-        ax.set_xlabel("Lap distance [m]", color=TEXT_MUTED, fontsize=7)
-        ax.set_ylabel("Δt vs ref [s]", color=TEXT_MUTED, fontsize=7)
+        self._panel_header(parent, "Δt vs REF", self.v_dt_hdr).pack(fill="x")
+        fig = Figure(figsize=(3, 2), facecolor=K_BLACK)
+        ax = fig.add_axes([0.17, 0.2, 0.79, 0.74])
+        self._style_ax(ax)
+        ax.axhline(0, color=K_LINE, lw=0.8)
+        ax.set_xlabel("Lap distance [m]", color=K_DIM, fontsize=6.5)
+        ax.set_ylabel("Δt [s]", color=K_DIM, fontsize=6.5)
         self._ax_dt = ax
-        self._dt_line, = ax.plot([], [], color=TXT, lw=1.0)
-        self._dt_msg = ax.text(0.5, 0.5, "Select a lap and a reference lap", transform=ax.transAxes, ha="center",
-                               va="center", fontsize=8, color=TEXT_MUTED)
-        self._dt_title = ax.set_title("", fontsize=8, color=TXT, pad=3)
-        self._dt_cur = ax.axvline(0, color=TXT, lw=0.9)
-        self._cv_dt, self._bl_dt, _ = self._canvas(parent, fig)
+        self._dt_line, = ax.plot([], [], color=K_BRIGHT, lw=0.8, solid_capstyle="butt")
+        self._dt_cur = ax.axvline(0, color=WHITE, lw=0.7, alpha=0.85)
+        self._cv_dt, self._bl_dt = self._canvas(parent, fig)
         self._bl_dt.add(self._dt_cur)
+
+    # ---- sector matrix
+    def _build_sectors(self, parent: tk.Widget) -> None:
+        self._panel_header(parent, "SECTOR DELTA MATRIX").pack(fill="x")
+        grid = tk.Frame(parent, bg=K_CARD, highlightbackground=K_LINE2, highlightthickness=1)
+        grid.pack(fill="both", expand=True)
+        for c, h in enumerate(("", "CUR", "REF", "Δ ms")):
+            self._label(grid, text=h, fg=K_DIM, font=self._f8b, width=9 if c else 5, anchor="e").grid(
+                row=0, column=c, padx=2, sticky="e")
+        self._sec_cells: list[tuple[tk.Label, tk.Label, tk.Label]] = []
+        for r, name in enumerate(("S1", "S2", "S3", "LAP"), 1):
+            self._label(grid, text=name, fg=K_ACCENT, font=self._f8b, width=5, anchor="w").grid(
+                row=r, column=0, padx=2, sticky="w")
+            cells = tuple(self._label(grid, text="--", fg=K_TXT, width=9, anchor="e") for _ in range(3))
+            for c, w in enumerate(cells, 1):
+                w.grid(row=r, column=c, padx=2, sticky="e")
+            self._sec_cells.append(cells)  # type: ignore[arg-type]
 
     # ---- strips
     def _build_strips(self, parent: tk.Widget) -> None:
-        scrub_row = tk.Frame(parent, bg=BG_CARD)
-        scrub_row.pack(side="bottom", fill="x")
-        self._scrub = ttk.Scale(scrub_row, from_=0, to=1000, orient="horizontal", command=self._on_scrub)
-        self._scrub.pack(side="left", fill="x", expand=True, padx=(8, 8), pady=4)
-        tk.Label(scrub_row, textvariable=self.v_scrub, bg=BG_CARD, fg=TXT, font=("Consolas", 8), width=44,
-                 anchor="e").pack(side="right", padx=8)
-
-        fig = Figure(figsize=(8, 8), facecolor=BG_DARK)
-        axs = list(fig.subplots(4, 1, sharex=True))
-        fig.subplots_adjust(left=0.065, right=0.93, top=0.992, bottom=0.06, hspace=0.05)
-        self._axl = axs
-        self._axr = [a.twinx() for a in axs]
-        self._all_axes = set(self._axl) | set(self._axr)
-        self._lines: list[tuple[str, Any, Any]] = []
-        self._readouts: list[tuple[str, str, Any]] = []
+        parent.columnconfigure(0, weight=1)
+        self._figs: list[Figure] = []
+        self._cvs: list[FigureCanvasTkAgg] = []
+        self._bls: list[_Blit] = []
+        self._axl: list[Any] = []
+        self._axr: list[Any] = []
+        self._lines: list[list[tuple[Ch, Any]]] = []
+        self._ghosts: list[Any] = []
         self._cursors: list[Any] = []
-        for si, spec in enumerate(STRIPS):
-            ax, axr = self._axl[si], self._axr[si]
-            _style(ax)
-            _style(axr, grid=False)
-            ax.margins(y=0.08)
-            axr.margins(y=0.08)
-            ax.set_ylabel(spec["yl"], color=TEXT_MUTED, fontsize=7)
-            axr.set_ylabel(spec["yr"], color=TEXT_MUTED, fontsize=7)
-            j = 0
-            for side, tgt in (("L", ax), ("R", axr)):
-                for key, short in spec[side]:
-                    sp = get_spec(key)
-                    ln, = tgt.plot([], [], color=sp.color_hex, lw=1.0, ls=sp.linestyle)
-                    self._lines.append((key, ln, tgt))
-                    txt = ax.text(0.008 + (j % 4) * 0.245, 0.965 - (j // 4) * 0.135, "", transform=ax.transAxes,
-                                  fontsize=6.5, color=sp.color_hex, va="top", family="monospace",
-                                  bbox=dict(facecolor=BG_DARK, alpha=0.6, pad=1.2, edgecolor="none"))
-                    self._readouts.append((key, short, txt))
-                    j += 1
-            cur = ax.axvline(0, color=TXT, lw=0.9, alpha=0.9)
+        self._zrects: list[Rectangle] = []
+        self._hdr: list[list[list[Any]]] = []
+        self._fills: dict[tuple[int, str], Any] = {}
+        self._cv_idx: dict[Any, int] = {}
+        n = len(STRIPS)
+        for si, strip in enumerate(STRIPS):
+            last = si == n - 1
+            self._build_strip_header(parent, 2 * si, strip)
+            holder = tk.Frame(parent, bg=K_BLACK)
+            holder.grid(row=2 * si + 1, column=0, sticky="nsew")
+            parent.rowconfigure(2 * si + 1, weight=118 if last else 100)
+            fig = Figure(figsize=(8, 2), facecolor=K_BLACK)
+            b = 0.22 if last else 0.03
+            ax = fig.add_axes([0.07, b, 0.86, 0.96 - b])
+            axr = ax.twinx()
+            self._style_ax(ax)
+            self._style_ax(axr, grid=False)
+            ax.margins(y=0.06)
+            axr.margins(y=0.06)
+            if not last:
+                ax.tick_params(labelbottom=False)
+            ax.set_ylabel(strip.yl, color=K_DIM, fontsize=6.5)
+            axr.set_ylabel(strip.yr, color=K_DIM, fontsize=6.5)
+            lines: list[tuple[Ch, Any]] = []
+            for chs, tgt in ((strip.left, ax), (strip.right, axr)):
+                for ch in chs:
+                    ln, = tgt.plot([], [], color=ch.color, lw=ch.lw, ls=ch.ls, solid_capstyle="butt",
+                                   dash_capstyle="butt", solid_joinstyle="miter", zorder=3)
+                    lines.append((ch, ln))
+            if strip.ghost:
+                gh, = ax.plot([], [], color=K_DIM, lw=0.7, ls="--", dash_capstyle="butt", zorder=2)
+                self._ghosts.append(gh)
+            else:
+                self._ghosts.append(None)
+            cur = ax.axvline(0, color=WHITE, lw=0.7, alpha=0.85, zorder=6)
+            rect = Rectangle((0, 0), 0, 1, transform=blended_transform_factory(ax.transData, ax.transAxes),
+                             fc=COBALT, alpha=0.18, ec=COBALT, lw=0.7, visible=False, zorder=7)
+            ax.add_artist(rect)
+            cv, bl = self._canvas(holder, fig)
+            bl.add(cur, rect)
+            self._cv_idx[cv] = si
+            for ev, fn in (("motion_notify_event", self._on_motion), ("button_press_event", self._on_press),
+                           ("button_release_event", self._on_release), ("scroll_event", self._on_scroll)):
+                cv.mpl_connect(ev, fn)
+            ax.callbacks.connect("xlim_changed", self._on_xlim)
+            self._figs.append(fig)
+            self._cvs.append(cv)
+            self._bls.append(bl)
+            self._axl.append(ax)
+            self._axr.append(axr)
+            self._lines.append(lines)
             self._cursors.append(cur)
-        self._axl[3].set_xlabel("Time [s]", color=TEXT_MUTED, fontsize=7)
+            self._zrects.append(rect)
+        self._axl[-1].set_xlabel("Time [s]", color=K_DIM, fontsize=6.5)
         axr0 = self._axr[0]
-        axr0.axhline(POWER_LIMIT_KW, color=ACCENT_RED, ls="--", lw=1.1, alpha=0.9)
-        axr0.text(0.995, POWER_LIMIT_KW, f"{POWER_LIMIT_KW:.0f} kW LIMIT", fontsize=6.5, color=ACCENT_RED, ha="right",
-                  va="bottom", transform=blended_transform_factory(axr0.transAxes, axr0.transData))
-        self._ln_over, = axr0.plot([], [], color=ACCENT_RED, lw=2.4, alpha=0.95)
-        self._time_txt = self._axl[3].text(0, 0.02, "", transform=blended_transform_factory(
-            self._axl[3].transData, self._axl[3].transAxes), fontsize=7, color=TXT, va="bottom", family="monospace",
-            bbox=dict(facecolor="#1f6feb", alpha=0.85, pad=1.5, edgecolor="none"))
+        self._lim_line = axr0.axhline(POWER_LIMIT_KW, color="#8a2a38", ls="--", lw=0.9, dash_capstyle="butt", zorder=4)
+        self._ln_over, = axr0.plot([], [], color=RED, lw=1.4, solid_capstyle="butt", zorder=5)
+        self._bls[0].add(self._lim_line)
+        self._build_scrub(parent, 2 * n)
 
-        self._cv_st, self._bl_st, self._nav = self._canvas(parent, fig, toolbar=True)
-        self._bl_st.add(*self._cursors, *[t for _, _, t in self._readouts], self._time_txt)
-        for a in self._all_axes:
-            a.callbacks.connect("xlim_changed", self._on_xlim)
-        self._cv_st.mpl_connect("motion_notify_event", self._on_motion)
-        self._cv_st.mpl_connect("button_press_event", self._on_press)
-        self._cv_st.mpl_connect("button_release_event", self._on_release)
-        self._cv_st.mpl_connect("scroll_event", self._on_scroll)
-        self._dragging = False
+    def _build_strip_header(self, parent: tk.Widget, row: int, strip: Strip) -> None:
+        hdr = tk.Frame(parent, bg=K_CARD, height=20, highlightbackground=K_LINE, highlightthickness=1)
+        hdr.grid(row=row, column=0, sticky="ew")
+        hdr.pack_propagate(False)
+        self._label(hdr, text=strip.title, fg=K_ACCENT, font=self._f8b).pack(side="left", padx=(6, 10))
+        cells: list[list[Any]] = []
+        for ch in strip.left + strip.right:
+            tk.Label(hdr, text="■", bg=K_CARD, fg=ch.color, font=self._f8).pack(side="left", padx=(0, 1))
+            tmpl = self._hdr_text(ch, strip, float("nan"))
+            lb = self._label(hdr, text=tmpl, fg=K_TXT, width=len(tmpl), anchor="w")
+            lb.pack(side="left", padx=(0, 8))
+            cells.append([ch, lb, tmpl, strip])
+        self._hdr.append(cells)
+
+    @staticmethod
+    def _hdr_text(ch: Ch, strip: Strip, v: float) -> str:
+        sp = get_spec(ch.key)
+        wv = 7 if strip.units else 6
+        val = "--" if v is None or not np.isfinite(v) else f"{v:.{sp.precision}f}"
+        return f"{ch.short} {val:>{wv}}" + (f" {sp.units}" if strip.units else "")
+
+    def _build_scrub(self, parent: tk.Widget, row: int) -> None:
+        f = tk.Frame(parent, bg=K_CARD, height=22, highlightbackground=K_LINE, highlightthickness=1)
+        f.grid(row=row, column=0, sticky="ew")
+        f.pack_propagate(False)
+        self._label(f, self.v_scrub, fg=K_BRIGHT, width=48, anchor="e").pack(side="right", padx=6)
+        cv = tk.Canvas(f, bg=K_CARD, height=18, highlightthickness=0, bd=0, cursor="sb_h_double_arrow")
+        cv.pack(side="left", fill="x", expand=True, padx=6)
+        cv.bind("<Configure>", lambda _e: self._draw_scrub())
+        cv.bind("<Button-1>", self._scrub_event)
+        cv.bind("<B1-Motion>", self._scrub_event)
+        self._scrub_cv = cv
 
     # ---- G-G
     def _build_gg(self, parent: tk.Widget) -> None:
-        fig = Figure(figsize=(3, 3), facecolor=BG_DARK)
-        ax = fig.add_axes([0.14, 0.12, 0.82, 0.80])
-        _style(ax)
-        ax.axhline(0, color=BORDER, lw=0.9)
-        ax.axvline(0, color=BORDER, lw=0.9)
+        self._panel_header(parent, "G-G TRACTION CIRCLE", self.v_gg_hdr).pack(fill="x")
+        fig = Figure(figsize=(3, 3), facecolor=K_BLACK)
+        ax = fig.add_axes([0.13, 0.11, 0.83, 0.86])
+        self._style_ax(ax)
         ax.set_aspect("equal", adjustable="box")
         ax.set_xlim(-2.4, 2.4)
         ax.set_ylim(-2.4, 2.4)
-        ax.set_xlabel("ay [g]  (+ = left)", color=TEXT_MUTED, fontsize=7)
-        ax.set_ylabel("ax [g]", color=TEXT_MUTED, fontsize=7)
-        ax.set_title("G-G DIAGRAM", fontsize=8, color=ACCENT_BLUE, pad=3, fontweight="bold")
+        ax.axhline(0, color=K_LINE, lw=0.6)
+        ax.axvline(0, color=K_LINE, lw=0.6)
+        for r in (1.0, 1.5, 2.0):
+            ax.add_patch(Circle((0, 0), r, fill=False, ec=K_LINE, lw=0.6, zorder=1))
+        ax.set_xlabel("ay [g] (+ left)", color=K_DIM, fontsize=6.5)
+        ax.set_ylabel("ax [g]", color=K_DIM, fontsize=6.5)
         self._ax_gg = ax
-        self._gg_norm = Normalize(0, 100)
-        self._gg_sc = ax.scatter([], [], s=3, c=[], cmap="turbo", norm=self._gg_norm, alpha=0.8, linewidths=0,
-                                 rasterized=True)
-        self._gg_trail, = ax.plot([], [], color="#ffffff", lw=1.2, alpha=0.8)
-        self._gg_pt, = ax.plot([], [], "o", ms=8, color="#ffffff", mec=ACCENT_RED, mew=2.0)
-        self._cv_gg, self._bl_gg, _ = self._canvas(parent, fig)
-        self._bl_gg.add(self._gg_trail, self._gg_pt)
+        self._gg_sc = ax.scatter([], [], s=1.2, c="#8b97a8", alpha=0.3, linewidths=0, rasterized=True, zorder=2)
+        self._gg_ell = Ellipse((0, 0), 0.0, 0.0, fill=False, ec=AMBER, ls="--", lw=0.8, zorder=3, visible=False)
+        ax.add_patch(self._gg_ell)
+        self._gg_trail, = ax.plot([], [], color=K_TXT, lw=0.6, alpha=0.5, solid_capstyle="butt", zorder=4)
+        self._gg_vec, = ax.plot([], [], color=RED, lw=0.9, solid_capstyle="butt", zorder=5)
+        self._gg_pt, = ax.plot([], [], "o", ms=3.5, color=RED, zorder=6)
+        self._cv_gg, self._bl_gg = self._canvas(parent, fig)
+        self._bl_gg.add(self._gg_ell, self._gg_trail, self._gg_vec, self._gg_pt)
 
     # ---- histograms
     def _build_hist(self, parent: tk.Widget) -> None:
-        self._lbl_fr = tk.Label(parent, text="", bg=BG_DARK, fg=TXT, font=("Consolas", 8), anchor="w")
-        self._lbl_rr = tk.Label(parent, text="", bg=BG_DARK, fg=TXT, font=("Consolas", 8), anchor="w")
-        self._lbl_rr.pack(side="bottom", fill="x", padx=6)
-        self._lbl_fr.pack(side="bottom", fill="x", padx=6)
-        fig = Figure(figsize=(3, 3), facecolor=BG_DARK)
+        self._panel_header(parent, "DAMPER VELOCITY [%]").pack(fill="x")
+        rows = tk.Frame(parent, bg=K_CARD, highlightbackground=K_LINE2, highlightthickness=1)
+        rows.pack(side="bottom", fill="x")
+        self._hist_lbls: dict[str, tk.Label] = {}
+        for c in CORNERS:
+            lb = self._label(rows, text="", fg=WHEEL_COL[c], anchor="w")
+            lb.pack(fill="x", padx=6)
+            self._hist_lbls[c] = lb
+        fig = Figure(figsize=(3, 3), facecolor=K_BLACK)
         axs = fig.subplots(2, 2).ravel()
-        fig.subplots_adjust(left=0.1, right=0.97, top=0.9, bottom=0.08, hspace=0.45, wspace=0.28)
-        fig.suptitle("DAMPER VELOCITY DISTRIBUTION [%]", fontsize=8, color=ACCENT_BLUE, fontweight="bold", y=0.985)
+        fig.subplots_adjust(left=0.1, right=0.97, top=0.92, bottom=0.08, hspace=0.5, wspace=0.28)
         self._hist_bars: dict[str, Any] = {}
-        self._hist_txt: dict[str, list[Any]] = {}
         self._hist_ax: dict[str, Any] = {}
         for ax, c in zip(axs, CORNERS):
-            _style(ax)
-            bars = ax.bar(range(4), [0, 0, 0, 0], color=HIST_COLORS, width=0.72)
+            self._style_ax(ax)
+            ax.bar(range(4), [0, 0, 0, 0], color=HIST_COLORS, width=0.7, ec=K_LINE, lw=0.6)
+            self._hist_bars[c] = ax.containers[0]
             ax.set_xticks(range(4))
-            ax.set_xticklabels(HIST_LABELS, fontsize=6.5)
+            ax.set_xticklabels(HIST_LABELS, fontsize=6)
             ax.set_ylim(0, 100)
-            ax.set_title(c.upper(), fontsize=8, color=CORNER_COLORS[c], pad=2, fontweight="bold")
-            self._hist_bars[c] = bars
+            ax.set_title(c.upper(), fontsize=7, color=WHEEL_COL[c], pad=2)
             self._hist_ax[c] = ax
-            self._hist_txt[c] = [ax.text(i, 0, "", ha="center", va="bottom", fontsize=6.5, color=TXT)
-                                 for i in range(4)]
-        self._cv_h, self._bl_h, _ = self._canvas(parent, fig)
+        self._cv_h, _ = self._canvas(parent, fig)
 
-    # ---- diagnostics
+    # ---- watchdog
     def _build_diag(self, parent: tk.Widget) -> None:
-        tk.Label(parent, text="DIAGNOSTICS WATCHDOG", bg=BG_CARD, fg=ACCENT_BLUE,
-                 font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=8, pady=(6, 2))
-        grid = tk.Frame(parent, bg=BG_CARD)
-        grid.pack(fill="x", padx=6, pady=(0, 6))
+        self._panel_header(parent, "DIAGNOSTICS WATCHDOG").pack(fill="x")
+        grid = tk.Frame(parent, bg=K_BLACK)
+        grid.pack(fill="both", expand=True)
+
+        def lo_hi(v: float, amber: float, red: float, low: bool) -> str:
+            bad = (lambda x, t: x < t) if low else (lambda x, t: x > t)
+            return RED if bad(v, red) else AMBER if bad(v, amber) else GREEN
+
         self._diag: list[dict[str, Any]] = [
-            dict(name="MIN CELL V", unit="V", fmt="{:.3f}", warn=(3.30, 3.00, "lo"), key="min_cell_voltage"),
-            dict(name="SoC", unit="%", fmt="{:.1f}", warn=(20.0, 10.0, "lo"), key="soc"),
-            dict(name="MAX INVERTER", unit="°C", fmt="{:.1f}", warn=(85.0, 100.0, "hi"), pre="inverter_temp_"),
-            dict(name="MAX MOTOR", unit="°C", fmt="{:.1f}", warn=(110.0, 125.0, "hi"), pre="motor_temp_"),
-            dict(name="TV YAW MOMENT", unit="N·m", fmt="{:+.0f}", warn=None, key="tv_yaw_moment"),
-            dict(name="ACCU POWER", unit="kW", fmt="{:.1f}", warn=(72.0, 80.0, "hi"), key="battery_power_kw"),
+            dict(name="MIN CELL V", unit="V", fmt="{:.3f}", key="min_cell_voltage",
+                 col=lambda v: GREEN if v > 3.2 else RED if v <= 3.0 else AMBER),
+            dict(name="ACCU POWER", unit="kW", fmt="{:.1f}", key="battery_power_kw", power=True,
+                 col=lambda v: AMBER),
+            dict(name="MAX INV T", unit="°C", fmt="{:.1f}", pre="inverter_temp_",
+                 col=lambda v: lo_hi(v, 85.0, 100.0, False)),
+            dict(name="MAX MOT T", unit="°C", fmt="{:.1f}", pre="motor_temp_",
+                 col=lambda v: lo_hi(v, 110.0, 125.0, False)),
+            dict(name="STATE OF CHG", unit="%", fmt="{:.1f}", key="soc", col=lambda v: lo_hi(v, 20.0, 10.0, True)),
+            dict(name="TV MOMENT", unit="N·m", fmt="{:+.0f}", key="tv_yaw_moment", col=lambda v: K_BRIGHT),
         ]
         for k, d in enumerate(self._diag):
-            cell = tk.Frame(grid, bg=BG_HOVER)
-            cell.grid(row=k // 2, column=k % 2, sticky="nsew", padx=2, pady=2)
+            cell = tk.Frame(grid, bg=K_CARD, highlightbackground=K_LINE2, highlightthickness=1)
+            cell.grid(row=k // 2, column=k % 2, sticky="nsew")
             grid.columnconfigure(k % 2, weight=1)
-            tk.Label(cell, text=d["name"], bg=BG_HOVER, fg=TEXT_MUTED, font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=6)
-            d["val"] = tk.Label(cell, text="--", bg=BG_HOVER, fg=TEXT_BRIGHT, font=("Consolas", 15, "bold"))
+            grid.rowconfigure(k // 2, weight=1)
+            self._label(cell, text=d["name"], fg=K_DIM, font=self._f8b).pack(anchor="w", padx=6, pady=(3, 0))
+            d["val"] = self._label(cell, text="--", fg=K_BRIGHT, font=self._f12)
             d["val"].pack(anchor="w", padx=6)
-            d["sub"] = tk.Label(cell, text="", bg=BG_HOVER, fg=TEXT_MUTED, font=("Consolas", 7))
+            d["sub"] = self._label(cell, text="", fg=K_DIM)
             d["sub"].pack(anchor="w", padx=6, pady=(0, 3))
 
     # ================================================================== data helpers
@@ -609,23 +734,23 @@ class TelemetryView(BaseView):
         except ValueError:
             return 1.0
 
+    def _x_for(self, lap_i0: int, lap_i1: int) -> np.ndarray:
+        if self.v_xmode.get() == "dist" and self._dist.size == self._t.size:
+            return self._dist[lap_i0:lap_i1] - self._dist[lap_i0]
+        return self._t[lap_i0:lap_i1] - self._t[lap_i0]
+
     def _rebuild_x(self) -> None:
         n = self._t.size
         i0, i1 = self._seg
         if n == 0 or i1 - i0 < 2:
             self._xs = np.zeros(0)
             return
-        if self._mode == "live":
-            full = self._t
-        elif self.v_xmode.get() == "dist" and self._dist.size == n:
-            full = self._dist - self._dist[i0]
-        else:
-            full = self._t - self._t[i0]
-        self._xs = np.asarray(full[i0:i1], dtype=float)
+        self._xs = np.asarray(self._t[i0:i1] if self._mode == "live" else self._x_for(i0, i1), dtype=float)
         lbl = "Time [s]" if (self._mode == "live" or self.v_xmode.get() == "time") else "Lap distance [m]"
-        self._axl[3].set_xlabel(lbl, color=TEXT_MUTED, fontsize=7)
+        self._axl[-1].set_xlabel(lbl, color=K_DIM, fontsize=6.5)
+        self._ghost_cache.clear()
 
-    def _gps_xy(self, ch: dict[str, np.ndarray]) -> Optional[tuple[np.ndarray, np.ndarray]]:
+    def _gps_xy(self, ch: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray] | None:
         if "gps_lat" not in ch or "gps_lon" not in ch:
             return None
         g = gps_to_local(ch["gps_lat"], ch["gps_lon"])
@@ -652,7 +777,7 @@ class TelemetryView(BaseView):
             r = np.radians(fill_nan(ch["yaw_rate"][i0:i1]))
             closed = self._lap_sel is not None
             psi = cumtrapz(r, t)
-            if closed:
+            if closed:  # remove yaw-rate bias so the heading integral closes to n*2pi
                 total = float(psi[-1])
                 target = 2.0 * math.pi * (round(total / (2.0 * math.pi)) or (1 if total >= 0 else -1))
                 r = r - (total - target) / max(float(t[-1] - t[0]), 1e-6)
@@ -669,34 +794,41 @@ class TelemetryView(BaseView):
             return empty, empty, "-"
         return np.asarray(tx[i0:i1]), np.asarray(ty[i0:i1]), "math"
 
+    @staticmethod
+    def _dec(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        if x.size <= MAX_PTS:
+            return x, y
+        sel = minmax_indices(y, MAX_PTS)
+        return x[sel], y[sel]
+
     # ================================================================== background workers
     def _run_bg(self, fn: Any, *args: Any) -> None:
         threading.Thread(target=fn, args=args, daemon=True).start()
 
     def _open_log(self) -> None:
         p = filedialog.askopenfilename(parent=self, title="Open telemetry log", filetypes=[
-            ("Telemetry logs", "*.mf4 *.mdf *.csv *.npz *.mat"), ("All files", "*.*")])
+            ("Telemetry logs", "*.log *.asc *.mf4 *.mdf *.csv *.npz *.mat"), ("All files", "*.*")])
         if p:
             self._load_async(Path(p))
 
-    def _load_async(self, path: Optional[Path]) -> None:
+    def _load_async(self, path: Path | None) -> None:
         if self._loading:
             return
         if self._mode != "offline":
             self.v_mode.set("offline")
             self._on_mode()
+        self._disconnect_live()
         self._loading = True
-        self.v_badge.set("loading…")
+        self.v_badge.set("LOADING…")
         self._run_bg(self._load_worker, path)
 
-    def _load_worker(self, path: Optional[Path]) -> None:
+    def _load_worker(self, path: Path | None) -> None:
         try:
             log: LogData = make_demo_log(n_laps=6) if path is None else load_log(path)
             front = self._app_state.get("front_tyre_params")
             rear = self._app_state.get("rear_tyre_params")
-            math_ch = compute_math_channels(log.t, log.channels, None, front, rear)
-            ch = {**log.channels, **math_ch}
-            an: Optional[LapAnalyzer] = None
+            ch = {**log.channels, **compute_math_channels(log.t, log.channels, None, front, rear)}
+            an: LapAnalyzer | None = None
             laps: list[Lap] = []
             if "vx" in ch:
                 an = LapAnalyzer(log.t, ch["vx"])
@@ -704,35 +836,32 @@ class TelemetryView(BaseView):
                     laps = an.detect_from_beacon(ch["lap_beacon"])
                 if not laps and "track_x" in ch and "track_y" in ch:
                     laps = an.detect_from_gate(ch["track_x"], ch["track_y"])
-            dist = an.dist if an is not None else np.zeros(log.t.size)
-            self._q.put(("loaded", dict(t=log.t, ch=ch, an=an, laps=laps, dist=dist, fs=log.fs,
+            self._q.put(("loaded", dict(t=log.t, ch=ch, an=an, laps=laps, fs=log.fs,
+                                        dist=an.dist if an is not None else np.zeros(log.t.size),
                                         name="DEMO (synthetic)" if path is None else path.name,
                                         gps=self._gps_xy(ch))))
         except Exception as exc:  # noqa: BLE001
             LOG.exception("load failed")
             self._q.put(("load_error", f"{type(exc).__name__}: {exc}"))
 
-    def _ellipse_worker(self, front: Any, rear: Any) -> None:
+    def _ellipse_worker(self, bucket: int, front: Any, rear: Any) -> None:
         try:
-            res = friction_ellipses_g(front, rear, None, (40.0 / 3.6, 90.0 / 3.6))
+            res = friction_ellipses_g(front, rear, None, (bucket / 3.6,))
         except Exception:  # noqa: BLE001
-            LOG.exception("friction ellipses failed")
+            LOG.exception("friction ellipse failed")
             res = []
-        self._q.put(("ellipses", res))
+        self._q.put(("ellipse", (bucket, res)))
 
-    def _start_ellipse_worker(self) -> None:
-        if self._ell_busy:
-            self._ell_dirty = True
+    def _request_ellipse(self, bucket: int) -> None:
+        if bucket in self._ell_cache or bucket in self._ell_pending:
             return
-        self._ell_busy = True
-        self._ell_dirty = False
-        self._run_bg(self._ellipse_worker, self._app_state.get("front_tyre_params"),
+        self._ell_pending.add(bucket)
+        self._run_bg(self._ellipse_worker, bucket, self._app_state.get("front_tyre_params"),
                      self._app_state.get("rear_tyre_params"))
 
     def _math_worker(self, t: np.ndarray, ch: dict[str, np.ndarray], front: Any, rear: Any) -> None:
         try:
-            out = compute_math_channels(t, ch, None, front, rear)
-            self._q.put(("math", (t, out)))
+            self._q.put(("math", (t, compute_math_channels(t, ch, None, front, rear))))
         except Exception:  # noqa: BLE001
             LOG.exception("live math channels failed")
             self._q.put(("math", None))
@@ -755,13 +884,15 @@ class TelemetryView(BaseView):
                     self._apply_loaded(payload)
             elif tag == "load_error":
                 self._loading = False
-                self.v_badge.set("load failed")
+                self.v_badge.set("LOAD FAILED")
                 messagebox.showerror("Telemetry", str(payload), parent=self)
-            elif tag == "ellipses":
-                self._ell_busy = False
-                self._apply_ellipses(payload)
-                if self._ell_dirty:
-                    self._start_ellipse_worker()
+            elif tag == "ellipse":
+                bucket, res = payload
+                self._ell_pending.discard(bucket)
+                if res:
+                    _, ay_g, ax_g = res[0]
+                    if np.isfinite(ay_g) and np.isfinite(ax_g):
+                        self._ell_cache[bucket] = (float(ay_g), float(ax_g))
             elif tag == "math":
                 self._math_busy = False
                 if payload is not None:
@@ -782,7 +913,8 @@ class TelemetryView(BaseView):
         start = self._best
         self.v_lap.set(self._cb_lap["values"][(self._laps.index(start) + 1) if start else 0])
         dur = float(self._t[-1] - self._t[0]) if self._t.size > 1 else 0.0
-        self.v_badge.set(f"{self._log_name} · {dur:.1f} s · {self._fs:.0f} Hz")
+        self.v_badge.set(f"{self._log_name} · {dur:.1f} s · {self._t.size} smp · {self._fs:.1f} Hz")
+        self.v_s_file.set(f"FILE {self._log_name} · {self._t.size} smp")
         self._set_segment(start)
 
     def _populate_laps(self) -> None:
@@ -792,32 +924,11 @@ class TelemetryView(BaseView):
             vals.append(f"Lap {la.index}: {format_lap_time(la.lap_time)} (Vmax: {la.v_max_kmh:.0f} km/h){tag}")
         self._cb_lap["values"] = vals
         self.v_lap.set(vals[0])
-        self.v_ref_lbl.set(f"Ref: Lap {self._ref.index}" if self._ref else "Ref: —")
-
-    def _apply_ellipses(self, res: list[tuple[float, float, float]]) -> None:
-        for a in self._ell_patches:
-            try:
-                a.remove()
-            except (ValueError, NotImplementedError):
-                pass
-        self._ell_patches.clear()
-        ax = self._ax_gg
-        cols = ("#d29922", "#f85149", "#bc8cff")
-        lim = 2.4
-        for k, (v, ay_g, ax_g) in enumerate(res):
-            if not (np.isfinite(ay_g) and np.isfinite(ax_g)):
-                continue
-            e = Ellipse((0, 0), 2 * ay_g, 2 * ax_g, fill=False, ec=cols[k % 3], ls="--", lw=1.2, zorder=3)
-            ax.add_patch(e)
-            tx = ax.text(0, ax_g, f" {v * 3.6:.0f} km/h", fontsize=6.5, color=cols[k % 3], va="bottom", ha="center")
-            self._ell_patches += [e, tx]
-            lim = max(lim, 1.15 * max(ay_g, ax_g))
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
-        self._cv_gg.draw_idle()
+        self.v_ref_lbl.set(f"REF L{self._ref.index}" if self._ref else "REF —")
+        self.v_best.set(f"■ BEST L{self._best.index} {format_lap_time(self._best.lap_time)}" if self._best else "")
 
     # ================================================================== segment / panels
-    def _set_segment(self, lap: Optional[Lap], reset_view: bool = True) -> None:
+    def _set_segment(self, lap: Lap | None, reset_view: bool = True) -> None:
         n = self._t.size
         self._lap_sel = lap
         self._seg = (lap.i0, lap.i1) if lap is not None else (0, n)
@@ -829,6 +940,7 @@ class TelemetryView(BaseView):
         self._refresh_strips()
         self._update_map()
         self._update_delta()
+        self._update_sectors()
         self._update_gg()
         self._update_hist()
         self._update_diag_extremes()
@@ -841,28 +953,58 @@ class TelemetryView(BaseView):
         self._busy = True
         try:
             self._axl[0].set_xlim(float(self._xs[0]), float(self._xs[-1]))
-            for a in self._all_axes:
+            for a in self._axl + self._axr:
                 a.set_autoscaley_on(True)
         finally:
             self._busy = False
-        try:
-            self._nav.update()
-        except Exception:  # noqa: BLE001
-            pass
+        for a in self._axl[1:]:
+            self._busy = True
+            try:
+                a.set_xlim(float(self._xs[0]), float(self._xs[-1]))
+            finally:
+                self._busy = False
 
     def _draw_all(self) -> None:
-        for cv in (self._cv_st, self._cv_map, self._cv_dt, self._cv_gg, self._cv_h):
+        for cv in (*self._cvs, self._cv_map, self._cv_dt, self._cv_gg, self._cv_h):
             cv.draw_idle()
+        self._draw_scrub()
 
-    def _decimate(self, y: np.ndarray) -> np.ndarray:
-        return minmax_indices(y, MAX_PTS)
+    def _blit_all(self) -> None:
+        for bl in (*self._bls, self._bl_map, self._bl_dt, self._bl_gg):
+            bl.update()
+
+    def _set_fill(self, si: int, ch: Ch, x: np.ndarray, y: np.ndarray) -> None:
+        old = self._fills.pop((si, ch.key), None)
+        if old is not None:
+            try:
+                old.remove()
+            except (ValueError, NotImplementedError):
+                pass
+        if x.size > 1:
+            self._fills[(si, ch.key)] = self._axl[si].fill_between(x, 0.0, y, color=ch.color, alpha=0.15, lw=0,
+                                                                   zorder=1)
+
+    def _ghost_xy(self, key: str) -> tuple[np.ndarray, np.ndarray] | None:
+        ref, lap = self._ref, self._lap_sel
+        y = self._ch.get(key)
+        if ref is None or lap is None or ref is lap or y is None or y.size != self._t.size or self._mode != "offline":
+            return None
+        ck = (key, ref.index, self.v_xmode.get())
+        if ck not in self._ghost_cache:
+            gx = self._x_for(ref.i0, ref.i1)
+            gy = y[ref.i0:ref.i1]
+            sel = decimate_indices(gx, gy, MAX_PTS, "lttb")
+            self._ghost_cache[ck] = (gx[sel], gy[sel])
+        return self._ghost_cache[ck]
 
     def _refresh_strips(self) -> None:
         xs = self._xs
         i0, i1 = self._seg
+        nt = self._t.size
         if xs.size < 2:
-            for _, ln, _ in self._lines:
-                ln.set_data([], [])
+            for lines in self._lines:
+                for _, ln in lines:
+                    ln.set_data([], [])
             self._ln_over.set_data([], [])
             return
         self._busy = True
@@ -873,34 +1015,35 @@ class TelemetryView(BaseView):
             if b - a < 2:
                 a, b = 0, xs.size
             xv = xs[a:b]
-            nt = self._t.size
-            for key, ln, _ in self._lines:
-                y = self._ch.get(key)
-                if y is None or y.size != nt:
-                    ln.set_data([], [])
-                    continue
-                yv = y[i0 + a:i0 + b]
-                if xv.size > MAX_PTS:
-                    sel = self._decimate(yv)
-                    ln.set_data(xv[sel], yv[sel])
-                else:
-                    ln.set_data(xv, yv)
-            p = self._ch.get("battery_power_kw")
-            if p is not None and p.size == nt:
-                pv = p[i0 + a:i0 + b]
-                sel = self._decimate(pv) if xv.size > MAX_PTS else np.arange(xv.size)
-                ps = pv[sel]
-                self._ln_over.set_data(xv[sel], np.where(ps > POWER_LIMIT_KW, ps, np.nan))
-            else:
-                self._ln_over.set_data([], [])
-            for ax in self._all_axes:
-                ax.relim()
-                ax.autoscale_view(scalex=False, scaley=True)
+            for si, strip in enumerate(STRIPS):
+                for ch, ln in self._lines[si]:
+                    y = self._ch.get(ch.key)
+                    if y is None or y.size != nt:
+                        ln.set_data([], [])
+                        if ch.fill:
+                            self._set_fill(si, ch, np.zeros(0), np.zeros(0))
+                        continue
+                    x2, y2 = self._dec(xv, y[i0 + a:i0 + b])
+                    ln.set_data(x2, y2)
+                    if ch.fill:
+                        self._set_fill(si, ch, x2, y2)
+                    if ch.key == "battery_power_kw":
+                        self._ln_over.set_data(x2, np.where(y2 > POWER_LIMIT_KW, y2, np.nan))
+                gh = self._ghosts[si]
+                if gh is not None and strip.ghost:
+                    g = self._ghost_xy(strip.ghost)
+                    if g is None:
+                        gh.set_data([], [])
+                    else:
+                        m = (g[0] >= lo) & (g[0] <= hi)
+                        gh.set_data(g[0][m], g[1][m])
+                for ax in (self._axl[si], self._axr[si]):
+                    ax.relim()
+                    ax.autoscale_view(scalex=False, scaley=True)
             axr0 = self._axr[0]
-            if axr0.get_autoscaley_on():
-                y0, y1 = axr0.get_ylim()
-                if y1 < POWER_LIMIT_KW * 1.1:
-                    axr0.set_ylim(y0, POWER_LIMIT_KW * 1.1)
+            y0, y1 = axr0.get_ylim()
+            if y1 < POWER_LIMIT_KW * 1.1:
+                axr0.set_ylim(y0, POWER_LIMIT_KW * 1.1)
         finally:
             self._busy = False
 
@@ -914,13 +1057,11 @@ class TelemetryView(BaseView):
         i0, i1 = self._seg
         x, y, src = self._track_for(i0, i1)
         self._map_x, self._map_y = x, y
-        ok = x.size >= 3 and np.isfinite(x).any() and np.isfinite(y).any()
-        if not ok:
-            self._map_under.set_data([], [])
+        if not (x.size >= 3 and np.isfinite(x).any() and np.isfinite(y).any()):
             self._map_lc.set_segments([])
-            self._map_txt.set_text("no position data (GPS / vx+yaw_rate required)")
-            self._blip.set_data([], [])
-            self._blip_glow.set_data([], [])
+            self.v_map_hdr.set("NO POSITION DATA (GPS / vx+yaw_rate)")
+            for ln in (self._blip_ring, self._blip_dot, self._blip_vec):
+                ln.set_data([], [])
             return
         n = x.size
         idx = np.linspace(0, n - 1, min(n, 4000)).astype(int)
@@ -940,76 +1081,88 @@ class TelemetryView(BaseView):
                 if hi - lo < 1e-9:
                     hi = lo + 1.0
             vals = np.nan_to_num(vals, nan=lo)
-        self._map_under.set_data(px, py)
         self._map_lc.set_segments(segs)
         self._map_lc.set_array(vals)
-        self._map_lc.set_cmap(self.v_cmap.get())
+        self._map_lc.set_cmap(CMAPS[self.v_cmap.get()])
         self._map_lc.set_clim(lo, hi)
         sp = get_spec(key)
-        self._map_txt.set_text(f"{sp.display_name}: {lo:.1f} → {hi:.1f} {sp.units}   ·   {src}")
+        self.v_map_hdr.set(f"{sp.display_name} {lo:.1f}→{hi:.1f} {sp.units} · {src}")
         xmn, xmx, ymn, ymx = float(np.nanmin(px)), float(np.nanmax(px)), float(np.nanmin(py)), float(np.nanmax(py))
         span = max(xmx - xmn, ymx - ymn, 1.0)
         pad = 0.08 * span
         self._ax_map.set_xlim(xmn - pad, xmx + pad)
         self._ax_map.set_ylim(ymn - pad, ymx + pad)
-        self._ax_map.set_aspect("equal", adjustable="datalim")
+        self._span_map = span
 
         def gate(k: int, label: str, color: str) -> None:
             j = min(max(k, 1), n - 2)
             dx, dy = x[j + 1] - x[j - 1], y[j + 1] - y[j - 1]
             nrm = math.hypot(dx, dy) or 1.0
             qx, qy = -dy / nrm, dx / nrm
-            ln_ = 0.035 * span
+            ln_ = 0.03 * span
             art, = self._ax_map.plot([x[k] - qx * ln_, x[k] + qx * ln_], [y[k] - qy * ln_, y[k] + qy * ln_],
-                                     color=color, lw=2.4, zorder=5)
-            tx = self._ax_map.text(x[k] + qx * ln_ * 2.0, y[k] + qy * ln_ * 2.0, label, fontsize=7, color=color,
-                                   ha="center", va="center", fontweight="bold", zorder=6)
-            self._map_decor += [art, tx]
+                                     color=color, lw=1.2, solid_capstyle="butt", zorder=5)
+            tx = self._ax_map.text(x[k] + qx * ln_ * 2.2, y[k] + qy * ln_ * 2.2, label, fontsize=6, color=color,
+                                   ha="center", va="center", zorder=6)
+            self._map_decor.extend([art, tx])
 
-        gate(0, "S/F", ACCENT_GREEN)
+        gate(0, "S/F", GREEN)
         lap = self._lap_sel
-        if lap is not None:
+        if lap is not None and self._mode == "offline":
             ts = lap.t_start + np.cumsum(lap.sectors)[:2]
             ks = np.clip(np.searchsorted(self._t[i0:i1], ts), 1, n - 2)
             for q, k in enumerate(ks):
-                gate(int(k), f"S{q + 1}|S{q + 2}", ACCENT_AMBER)
+                gate(int(k), f"S{q + 1}", AMBER)
 
     def _update_delta(self) -> None:
         ax = self._ax_dt
         for c in list(ax.collections):
             c.remove()
         lap, ref = self._lap_sel, self._ref
-        if lap is None or ref is None or self._an is None:
+        if lap is None or ref is None or self._an is None or self._mode != "offline":
             self._dt_line.set_data([], [])
-            self._dt_msg.set_visible(True)
-            self._dt_title.set_text("")
+            self.v_dt_hdr.set("select lap + reference")
             return
         d, dt = self._an.delta_time(lap, ref)
-        self._dt_msg.set_visible(False)
-        sel = self._decimate(dt) if d.size > MAX_PTS else np.arange(d.size)
+        sel = decimate_indices(d, dt, MAX_PTS, "lttb")
         d, dt = d[sel], dt[sel]
         self._dt_line.set_data(d, dt)
-        ax.fill_between(d, 0, dt, where=dt <= 0, color=ACCENT_GREEN, alpha=0.55, interpolate=True, lw=0)
-        ax.fill_between(d, 0, dt, where=dt > 0, color=ACCENT_RED, alpha=0.55, interpolate=True, lw=0)
+        ax.fill_between(d, 0, dt, where=dt <= 0, color=GREEN, alpha=0.5, interpolate=True, lw=0)
+        ax.fill_between(d, 0, dt, where=dt > 0, color=RED, alpha=0.5, interpolate=True, lw=0)
         ax.set_xlim(float(d[0]), float(d[-1]) if d[-1] > d[0] else float(d[0]) + 1.0)
         m = max(float(np.nanmax(np.abs(dt))), 0.05) * 1.15
         ax.set_ylim(-m, m)
-        self._dt_title.set_text(f"Lap {lap.index} vs Lap {ref.index}   Δ end = {dt[-1]:+.3f} s")
+        self.v_dt_hdr.set(f"L{lap.index} vs L{ref.index} · end {dt[-1]:+.3f} s")
+
+    def _update_sectors(self) -> None:
+        lap, ref = self._lap_sel, self._ref
+        for r, cells in enumerate(self._sec_cells):
+            vals: list[tuple[float | None, str]] = []
+            for la in (lap, ref):
+                if la is None or self._mode != "offline":
+                    vals.append((None, "--"))
+                elif r < 3:
+                    vals.append((la.sectors[r], f"{la.sectors[r]:.3f}"))
+                else:
+                    vals.append((la.lap_time, format_lap_time(la.lap_time)))
+            cells[0].configure(text=vals[0][1])
+            cells[1].configure(text=vals[1][1])
+            if vals[0][0] is None or vals[1][0] is None:
+                cells[2].configure(text="--", fg=K_TXT)
+            else:
+                dms = (vals[0][0] - vals[1][0]) * 1000.0
+                cells[2].configure(text=f"{dms:+.0f} ms", fg=GREEN if dms < 0 else RED if dms > 0 else K_TXT)
 
     def _update_gg(self) -> None:
         i0, i1 = self._seg
-        ay, ax_, v = self._ch.get("ay"), self._ch.get("ax"), self._ch.get("vx")
+        ay, ax_ = self._ch.get("ay"), self._ch.get("ax")
         if ay is None or ax_ is None or ay.size != self._t.size or i1 - i0 < 2:
             self._gg_sc.set_offsets(np.zeros((0, 2)))
             return
-        s = max(1, (i1 - i0) // 4000)
+        s = max(1, (i1 - i0) // 5000)
         a, b = ay[i0:i1:s], ax_[i0:i1:s]
-        c = v[i0:i1:s] if v is not None and v.size == self._t.size else np.zeros_like(a)
-        m = np.isfinite(a) & np.isfinite(b) & np.isfinite(c)
+        m = np.isfinite(a) & np.isfinite(b)
         self._gg_sc.set_offsets(np.column_stack([a[m], b[m]]))
-        self._gg_sc.set_array(c[m])
-        vmax = _nanfn(np.max, c[m]) if m.any() else 100.0
-        self._gg_norm.vmin, self._gg_norm.vmax = 0.0, max(vmax, 1.0)
 
     def _update_hist(self) -> None:
         i0, i1 = self._seg
@@ -1018,32 +1171,23 @@ class TelemetryView(BaseView):
             v = self._ch.get(f"damper_velocity_{c}")
             z = self._ch.get(f"damper_travel_{c}")
             if v is None and z is not None and i1 - i0 > 8:
-                v = damper_velocity(self._t[i0:i1], z[i0:i1])
-                v = np.concatenate([np.zeros(i0), v, np.zeros(max(self._t.size - i1, 0))])
+                v = np.concatenate([np.zeros(i0), damper_velocity(self._t[i0:i1], z[i0:i1]),
+                                    np.zeros(max(self._t.size - i1, 0))])
             if v is None or v.size != self._t.size:
                 cnt[c] = np.zeros(4)
                 continue
             vv = v[i0:i1]
             vv = vv[np.isfinite(vv)]
-            cnt[c] = np.array([(vv < -50).sum(), ((vv < 0) & (vv >= -50)).sum(),
-                               ((vv >= 0) & (vv <= 50)).sum(), (vv > 50).sum()], dtype=float)
+            cnt[c] = np.array([((vv >= 0) & (vv <= 50)).sum(), (vv > 50).sum(),
+                               ((vv < 0) & (vv >= -50)).sum(), (vv < -50).sum()], dtype=float)
         for c in CORNERS:
-            tot = max(cnt[c].sum(), 1.0)
-            pct = 100.0 * cnt[c] / tot
-            top = max(float(pct.max()) * 1.3, 10.0)
-            self._hist_ax[c].set_ylim(0, top)
-            for k, (bar, tx) in enumerate(zip(self._hist_bars[c], self._hist_txt[c])):
-                bar.set_height(float(pct[k]))
-                tx.set_position((k, float(pct[k])))
-                tx.set_text(f"{pct[k]:.0f}")
-
-        def row(name: str, a: str, b: str) -> str:
-            tot = cnt[a] + cnt[b]
-            p = 100.0 * tot / max(tot.sum(), 1.0)
-            return f"{name}  " + " | ".join(f"{lab} {p[k]:4.1f}" for k, lab in enumerate(HIST_LABELS))
-
-        self._lbl_fr.configure(text=row("FRONT", "fl", "fr"))
-        self._lbl_rr.configure(text=row("REAR ", "rl", "rr"))
+            pct = 100.0 * cnt[c] / max(cnt[c].sum(), 1.0)
+            self._hist_ax[c].set_ylim(0, max(float(pct.max()) * 1.2, 10.0))
+            for bar, h in zip(self._hist_bars[c], pct):
+                bar.set_height(float(h))
+            self._hist_lbls[c].configure(
+                text=f"{c.upper()}  " + "  ".join(f"{lab} {pct[k]:4.1f}" for k, lab in enumerate(HIST_LABELS)))
+        self._cv_h.draw_idle()
 
     def _update_diag_extremes(self) -> None:
         i0, i1 = self._seg
@@ -1052,37 +1196,41 @@ class TelemetryView(BaseView):
                 y = self._ch.get(d["key"])
                 seg = y[i0:i1] if y is not None and y.size == self._t.size else np.zeros(0)
                 if d["key"] in ("min_cell_voltage", "soc"):
-                    d["ext"] = _nanfn(np.min, seg) if seg.size else float("nan")
-                    d["ext_lbl"] = "seg min"
+                    d["ext"], d["ext_lbl"] = (_nanfn(np.min, seg) if seg.size else float("nan")), "min"
                 else:
-                    d["ext"] = _nanfn(lambda a: a[np.argmax(np.abs(a))], seg) if seg.size and np.isfinite(seg).any() \
-                        else float("nan")
-                    d["ext_lbl"] = "seg peak"
+                    d["ext"] = _nanfn(lambda a: a[np.argmax(np.abs(a))], seg) if seg.size else float("nan")
+                    d["ext_lbl"] = "pk"
             else:
                 vals = [_nanfn(np.max, self._ch[f"{d['pre']}{c}"][i0:i1]) for c in CORNERS
                         if f"{d['pre']}{c}" in self._ch and self._ch[f"{d['pre']}{c}"].size == self._t.size]
                 vals = [v for v in vals if np.isfinite(v)]
-                d["ext"] = max(vals) if vals else float("nan")
-                d["ext_lbl"] = "seg max"
+                d["ext"], d["ext_lbl"] = (max(vals) if vals else float("nan")), "max"
 
     def _update_diag(self, i: int) -> None:
         for d in self._diag:
             if "key" in d:
                 v = self._val(d["key"], i)
             else:
-                vs = [self._val(f"{d['pre']}{c}", i) for c in CORNERS]
-                vs = [x for x in vs if np.isfinite(x)]
+                vs = [x for x in (self._val(f"{d['pre']}{c}", i) for c in CORNERS) if np.isfinite(x)]
                 v = max(vs) if vs else float("nan")
-            col = TEXT_BRIGHT
-            if np.isfinite(v) and d["warn"] is not None:
-                amber, red, mode = d["warn"]
-                bad = (lambda x, th: x < th) if mode == "lo" else (lambda x, th: x > th)
-                col = ACCENT_RED if bad(v, red) else ACCENT_AMBER if bad(v, amber) else ACCENT_GREEN
-            d["val"].configure(text=("--" if not np.isfinite(v) else d["fmt"].format(v)) + f" {d['unit']}", fg=col)
+            fin = np.isfinite(v)
+            col = d["col"](v) if fin else K_DIM
+            if d.get("power") and fin and v > POWER_LIMIT_KW:
+                col = RED if self._flash else "#661020"
+            d["val"].configure(text=("--" if not fin else d["fmt"].format(v)) + f" {d['unit']}", fg=col)
             e = d.get("ext", float("nan"))
             d["sub"].configure(text=f"{d.get('ext_lbl', '')} " + ("--" if not np.isfinite(e) else d["fmt"].format(e)))
 
     # ================================================================== cursor
+    def _update_headers(self, i: int) -> None:
+        for cells in self._hdr:
+            for cell in cells:
+                ch, lb, last, strip = cell
+                txt = self._hdr_text(ch, strip, self._val(ch.key, i))
+                if txt != last:
+                    lb.configure(text=txt)
+                    cell[2] = txt
+
     def _update_cursor(self, blit: bool = True) -> None:
         n = self._t.size
         i0, i1 = self._seg
@@ -1090,7 +1238,7 @@ class TelemetryView(BaseView):
             for ln in self._cursors:
                 ln.set_visible(False)
             if blit:
-                self._bl_st.update()
+                self._blit_all()
             return
         i = int(np.clip(self._ci, i0, i1 - 1))
         self._ci = i
@@ -1098,52 +1246,104 @@ class TelemetryView(BaseView):
         for ln in self._cursors:
             ln.set_visible(True)
             ln.set_xdata([x, x])
-        for key, short, txt in self._readouts:
-            txt.set_text(f"{short} {_fmt(key, self._val(key, i))}")
-        lo, hi = self._axl[0].get_xlim()
-        frac = (x - lo) / (hi - lo) if hi > lo else 0.0
-        self._time_txt.set_x(x)
-        self._time_txt.set_ha("right" if frac > 0.8 else "left")
+        self._update_headers(i)
         t_rel = float(self._t[i] - self._t[i0]) if self._mode == "offline" else float(self._t[i])
         d_rel = float(self._dist[i] - self._dist[i0]) if self._dist.size == n else float("nan")
-        lbl = f"t={t_rel:8.3f} s" + (f"  d={d_rel:7.1f} m" if np.isfinite(d_rel) else "")
-        self._time_txt.set_text(lbl)
-        self.v_scrub.set(lbl + (f"   lap {self._lap_sel.index}" if self._lap_sel else ""))
-        self.v_s_cur.set(f"cursor: {lbl.strip()}")
-        span = max(i1 - 1 - i0, 1)
-        self._scrub_lock = True
-        self._scrub.set(1000.0 * (i - i0) / span)
-        self._scrub_lock = False
-        # map blip
+        lbl = f"t={t_rel:9.3f} s" + (f"  d={d_rel:7.1f} m" if np.isfinite(d_rel) else "")
+        if self._lap_sel is not None:
+            lbl += f"  L{self._lap_sel.index}"
+        self.v_scrub.set(lbl)
+        self.v_s_cur.set(f"CUR {lbl.strip()}")
+        self._draw_scrub()
         k = i - i0
-        if self._map_x.size > k and np.isfinite(self._map_x[k]):
-            self._blip.set_data([self._map_x[k]], [self._map_y[k]])
-            self._blip_glow.set_data([self._map_x[k]], [self._map_y[k]])
+        if self._map_x.size > k and np.isfinite(self._map_x[k]) and np.isfinite(self._map_y[k]):
+            px, py = float(self._map_x[k]), float(self._map_y[k])
+            j = min(k + 8, self._map_x.size - 1)
+            j0 = j if j != k else max(k - 8, 0)
+            hx, hy = float(self._map_x[j] - self._map_x[j0]), float(self._map_y[j] - self._map_y[j0])
+            nrm = math.hypot(hx, hy) or 1.0
+            ln_ = 0.05 * getattr(self, "_span_map", 1.0)
+            sgn = 1.0 if j != k else -1.0
+            self._blip_ring.set_data([px], [py])
+            self._blip_dot.set_data([px], [py])
+            self._blip_vec.set_data([px, px + sgn * hx / nrm * ln_], [py, py + sgn * hy / nrm * ln_])
         else:
-            self._blip.set_data([], [])
-            self._blip_glow.set_data([], [])
-        # delta cursor
-        if self._lap_sel is not None and self._dist.size == n:
+            for ln in (self._blip_ring, self._blip_dot, self._blip_vec):
+                ln.set_data([], [])
+        if self._lap_sel is not None and self._dist.size == n and self._mode == "offline":
             self._dt_cur.set_visible(True)
             dx = float(self._dist[i] - self._dist[i0])
             self._dt_cur.set_xdata([dx, dx])
         else:
             self._dt_cur.set_visible(False)
-        # G-G
         ay, ax_ = self._val("ay", i), self._val("ax", i)
-        self._blink += 1
         if np.isfinite(ay) and np.isfinite(ax_):
             self._gg_pt.set_data([ay], [ax_])
-            self._gg_pt.set_markersize(10 if (self._blink // 6) % 2 else 6)
+            self._gg_vec.set_data([0.0, ay], [0.0, ax_])
             a = max(i0, i - 60)
             self._gg_trail.set_data(self._ch["ay"][a:i + 1], self._ch["ax"][a:i + 1])
         else:
-            self._gg_pt.set_data([], [])
-            self._gg_trail.set_data([], [])
+            for ln in (self._gg_pt, self._gg_vec, self._gg_trail):
+                ln.set_data([], [])
+        self._update_ellipse(self._val("vx", i))
         self._update_diag(i)
+        pw = self._val("battery_power_kw", i)
+        over = np.isfinite(pw) and pw > POWER_LIMIT_KW
+        self._lim_line.set_color((RED if self._flash else "#661020") if over else "#8a2a38")
         if blit:
-            for bl in (self._bl_st, self._bl_map, self._bl_dt, self._bl_gg):
-                bl.update()
+            self._blit_all()
+
+    def _update_ellipse(self, v_kmh: float) -> None:
+        if not np.isfinite(v_kmh):
+            self._gg_ell.set_visible(False)
+            return
+        bucket = max(5, int(round(v_kmh / 5.0)) * 5)
+        self._request_ellipse(bucket)
+        hit = self._ell_cache.get(bucket)
+        if hit is None and self._ell_cache:
+            hit = self._ell_cache[min(self._ell_cache, key=lambda b: abs(b - bucket))]
+        if hit is None:
+            self._gg_ell.set_visible(False)
+            return
+        self._gg_ell.set_width(2 * hit[0])
+        self._gg_ell.set_height(2 * hit[1])
+        self._gg_ell.set_visible(True)
+        self.v_gg_hdr.set(f"MF6.1 @ {bucket} km/h · ay {hit[0]:.2f} g · ax {hit[1]:.2f} g")
+
+    def _draw_scrub(self) -> None:
+        cv = getattr(self, "_scrub_cv", None)
+        if cv is None:
+            return
+        cv.delete("all")
+        w, h = max(cv.winfo_width(), 2), max(cv.winfo_height(), 2)
+        mid = h // 2
+        cv.create_line(0, mid, w, mid, fill=K_LINE)
+        i0, i1 = self._seg
+        if self._t.size == 0 or i1 - i0 < 2:
+            return
+        span = max(i1 - 1 - i0, 1)
+        frac = float(np.clip((self._ci - i0) / span, 0.0, 1.0))
+        lap = self._lap_sel
+        if lap is not None and self._mode == "offline" and lap.lap_time > 0:
+            for cs in np.cumsum(lap.sectors)[:2]:
+                xx = int(cs / lap.lap_time * w)
+                cv.create_line(xx, 2, xx, h - 2, fill=AMBER)
+        xp = int(frac * (w - 1))
+        cv.create_line(0, mid, xp, mid, fill=COBALT, width=2)
+        cv.create_rectangle(xp - 1, 1, xp + 1, h - 1, fill=WHITE, outline="")
+
+    def _scrub_event(self, e: tk.Event) -> None:
+        if self._xs.size < 2:
+            return
+        self._pause()
+        w = max(self._scrub_cv.winfo_width(), 1)
+        i0, i1 = self._seg
+        self._ci = i0 + int(round(float(np.clip(e.x / w, 0.0, 1.0)) * (i1 - 1 - i0)))
+        self._update_cursor()
+
+    # ================================================================== mouse (strip canvases)
+    def _x_from(self, ev: Any, si: int) -> float:
+        return float(self._axl[si].transData.inverted().transform((ev.x, ev.y))[0])
 
     def _set_cursor_from_x(self, xdata: float) -> None:
         xs = self._xs
@@ -1155,81 +1355,147 @@ class TelemetryView(BaseView):
         self._ci = self._seg[0] + k
         self._update_cursor()
 
-    # ================================================================== mouse / scrub
-    def _tool_active(self) -> bool:
-        m = getattr(self._nav, "mode", "")
-        return bool(getattr(m, "value", m))
+    def _clamp_view(self, lo: float, hi: float) -> tuple[float, float]:
+        a, b = float(self._xs[0]), float(self._xs[-1])
+        w = min(hi - lo, b - a)
+        lo = min(max(lo, a), b - w)
+        return lo, lo + w
 
     def _on_motion(self, ev: Any) -> None:
-        if ev.inaxes not in self._all_axes or ev.xdata is None or self._tool_active():
+        si = self._cv_idx.get(ev.canvas)
+        if si is None or self._xs.size < 2:
+            return
+        d = self._drag
+        if d is not None:
+            if d["kind"] == "box":
+                x0, x1 = sorted((d["x0"], self._x_from(ev, si)))
+                for r in self._zrects:
+                    r.set_x(x0)
+                    r.set_width(x1 - x0)
+                    r.set_visible(True)
+                for bl in self._bls:
+                    bl.update()
+            elif d["kind"] == "pan":
+                span = d["hi"] - d["lo"]
+                shift = (ev.x - d["px"]) * span / max(self._axl[si].bbox.width, 1.0)
+                self._axl[0].set_xlim(*self._clamp_view(d["lo"] - shift, d["hi"] - shift))
+            elif d["kind"] == "scrub":
+                self._set_cursor_from_x(self._x_from(ev, si))
             return
         if self._playing or (self._mode == "live" and not self._live_frozen):
             return
-        self._set_cursor_from_x(float(ev.xdata))
+        if ev.inaxes in (self._axl[si], self._axr[si]) and ev.xdata is not None:
+            self._set_cursor_from_x(self._x_from(ev, si))
 
     def _on_press(self, ev: Any) -> None:
-        if ev.inaxes not in self._all_axes or ev.xdata is None or self._tool_active():
+        si = self._cv_idx.get(ev.canvas)
+        if si is None or self._xs.size < 2 or ev.inaxes not in (self._axl[si], self._axr[si]):
             return
         if ev.dblclick:
             self._reset_view()
             self._refresh_strips()
-            self._cv_st.draw_idle()
+            self._draw_all()
             return
+        lo, hi = self._axl[0].get_xlim()
         if ev.button == 1:
             self._pause()
-            self._dragging = True
-            self._set_cursor_from_x(float(ev.xdata))
+            self._drag = {"kind": "scrub"}
+            self._set_cursor_from_x(self._x_from(ev, si))
+        elif ev.button == 3:
+            self._drag = {"kind": "box", "x0": self._x_from(ev, si), "px": ev.x}
+        elif ev.button == 2:
+            self._drag = {"kind": "pan", "px": ev.x, "lo": lo, "hi": hi}
 
-    def _on_release(self, _ev: Any) -> None:
-        self._dragging = False
+    def _on_release(self, ev: Any) -> None:
+        d, self._drag = self._drag, None
+        if d is None:
+            return
+        if d["kind"] == "box":
+            si = self._cv_idx.get(ev.canvas, 0)
+            for r in self._zrects:
+                r.set_visible(False)
+            if abs(ev.x - d["px"]) > 4:
+                x0, x1 = sorted((d["x0"], self._x_from(ev, si)))
+                if x1 - x0 > 1e-9:
+                    self._axl[0].set_xlim(*self._clamp_view(x0, x1))
+                    return
+            for bl in self._bls:
+                bl.update()
 
     def _on_scroll(self, ev: Any) -> None:
-        if ev.inaxes not in self._all_axes or ev.xdata is None or self._xs.size < 2:
+        si = self._cv_idx.get(ev.canvas)
+        if si is None or self._xs.size < 2 or ev.inaxes not in (self._axl[si], self._axr[si]):
             return
         if self._mode == "live" and not self._live_frozen:
             return
         lo, hi = self._axl[0].get_xlim()
         f = 0.8 if ev.button == "up" else 1.25
-        x = float(ev.xdata)
-        nlo = max(x - (x - lo) * f, float(self._xs[0]))
-        nhi = min(x + (hi - x) * f, float(self._xs[-1]))
-        if nhi - nlo < 0.05 * max(float(self._xs[-1] - self._xs[0]), 1e-9) * 0.1:
+        x = self._x_from(ev, si)
+        nlo, nhi = x - (x - lo) * f, x + (hi - x) * f
+        if nhi - nlo < 1e-4 * max(float(self._xs[-1] - self._xs[0]), 1e-9):
             return
-        self._axl[0].set_xlim(nlo, nhi)
+        self._axl[0].set_xlim(*self._clamp_view(nlo, nhi))
 
-    def _on_scrub(self, val: str) -> None:
-        if self._scrub_lock or self._xs.size < 2:
-            return
-        self._pause()
-        i0, i1 = self._seg
-        self._ci = i0 + int(round(float(val) / 1000.0 * (i1 - 1 - i0)))
-        self._update_cursor()
-
-    def _on_xlim(self, _ax: Any) -> None:
+    def _on_xlim(self, ax: Any) -> None:
         if self._busy:
             return
+        lo, hi = ax.get_xlim()
+        self._busy = True
+        try:
+            for a in self._axl:
+                if a is not ax:
+                    a.set_xlim(lo, hi)
+        finally:
+            self._busy = False
         if self._deb_id is not None:
             try:
                 self.after_cancel(self._deb_id)
             except tk.TclError:
                 pass
-        self._deb_id = self.after(30, self._xlim_refresh)
+        self._deb_id = self.after(25, self._xlim_refresh)
 
     def _xlim_refresh(self) -> None:
         self._deb_id = None
         self._refresh_strips()
-        self._cv_st.draw_idle()
+        for cv in self._cvs:
+            cv.draw_idle()
 
-    # ================================================================== transport
+    # ================================================================== keyboard / transport
+    def _bind_keys(self) -> None:
+        if self._key_ids:
+            return
+        top = self.winfo_toplevel()
+        for seq, fn in (("<space>", lambda e: self._key(e, self._toggle_play)),
+                        ("<Left>", lambda e: self._key(e, lambda: self._step(-0.05))),
+                        ("<Right>", lambda e: self._key(e, lambda: self._step(0.05))),
+                        ("<Home>", lambda e: self._key(e, lambda: self._jump(False))),
+                        ("<End>", lambda e: self._key(e, lambda: self._jump(True)))):
+            self._key_ids.append((seq, top.bind(seq, fn, add="+")))
+
+    def _unbind_keys(self) -> None:
+        try:
+            top = self.winfo_toplevel()
+            for seq, fid in self._key_ids:
+                top.unbind(seq, fid)
+        except tk.TclError:
+            pass
+        self._key_ids.clear()
+
+    @staticmethod
+    def _key(e: tk.Event, fn: Any) -> None:
+        if isinstance(e.widget, (tk.Entry, ttk.Entry, ttk.Combobox)):
+            return
+        fn()
+
     def _pause(self) -> None:
         if self._playing:
             self._playing = False
-            self.v_play.set("▶")
+            self.v_play.set("PLAY")
 
     def _toggle_play(self) -> None:
         if self._mode == "live":
             self._live_frozen = not self._live_frozen
-            self.v_play.set("▶" if self._live_frozen else "⏸")
+            self.v_play.set("RESUME" if self._live_frozen else "FREEZE")
             return
         if self._t.size == 0:
             return
@@ -1242,7 +1508,7 @@ class TelemetryView(BaseView):
         self._playing = True
         self._play_wall = time.perf_counter()
         self._play_t = float(self._t[self._ci])
-        self.v_play.set("⏸")
+        self.v_play.set("PAUSE")
 
     def _jump(self, end: bool) -> None:
         if self._t.size == 0:
@@ -1253,20 +1519,19 @@ class TelemetryView(BaseView):
         self._update_cursor()
 
     def _step(self, dt: float) -> None:
-        if self._t.size == 0 or self._mode == "live" and not self._live_frozen:
+        if self._t.size == 0 or (self._mode == "live" and not self._live_frozen):
             return
         self._pause()
         i0, i1 = self._seg
-        tgt = float(self._t[self._ci]) + dt
-        self._ci = int(np.clip(np.searchsorted(self._t, tgt), i0, i1 - 1))
+        self._ci = int(np.clip(np.searchsorted(self._t, float(self._t[self._ci]) + dt), i0, i1 - 1))
         self._update_cursor()
 
     # ================================================================== toolbar handlers
     def _on_lap_select(self, _e: Any = None) -> None:
         k = self._cb_lap.current()
-        lap = None if k <= 0 else self._laps[k - 1]
         self._pause()
-        self._set_segment(lap)
+        self._set_segment(None if k <= 0 else self._laps[k - 1])
+        self.focus_set()
 
     def _toggle_ref(self) -> None:
         if self.v_isref.get():
@@ -1275,9 +1540,12 @@ class TelemetryView(BaseView):
                 self.v_isref.set(False)
         else:
             self._ref = None
-        self.v_ref_lbl.set(f"Ref: Lap {self._ref.index}" if self._ref else "Ref: —")
+        self.v_ref_lbl.set(f"REF L{self._ref.index}" if self._ref else "REF —")
+        self._ghost_cache.clear()
+        self._refresh_strips()
         self._update_delta()
-        self._cv_dt.draw_idle()
+        self._update_sectors()
+        self._draw_all()
 
     def _on_xmode(self) -> None:
         if self._mode == "live":
@@ -1287,12 +1555,13 @@ class TelemetryView(BaseView):
         self._reset_view()
         self._refresh_strips()
         self._update_cursor(blit=False)
-        self._cv_st.draw_idle()
+        self._draw_all()
 
     def _on_heat(self) -> None:
         self._update_map()
         self._update_cursor(blit=False)
         self._cv_map.draw_idle()
+        self.focus_set()
 
     def _on_src(self, _e: Any = None) -> None:
         self.v_chan.set({"socketcan": "vcan0", "serial": "/dev/ttyUSB0", "udp": "0.0.0.0:5005"}[self.v_src.get()])
@@ -1309,15 +1578,16 @@ class TelemetryView(BaseView):
             self._mode = "live"
             self.v_xmode.set("time")
             self._live_frozen = False
-            self.v_play.set("⏸")
+            self.v_play.set("FREEZE")
             self._cb_lap.configure(state="disabled")
             self._clear_data()
         else:
+            self._disconnect_live()
             self._grp_live.pack_forget()
             self._grp_off.pack(side="left")
             self._mode = "offline"
             self._cb_lap.configure(state="readonly")
-            self.v_play.set("▶")
+            self.v_play.set("PLAY")
             if self._stash is not None:
                 for k, v in self._stash.items():
                     setattr(self, k, v)
@@ -1338,6 +1608,7 @@ class TelemetryView(BaseView):
         self._refresh_strips()
         self._update_map()
         self._update_delta()
+        self._update_sectors()
         self._update_gg()
         self._update_hist()
         self._update_cursor(blit=False)
@@ -1356,12 +1627,14 @@ class TelemetryView(BaseView):
         ing.start()
         self._ingest = ing
         self._math_cache = None
-        self.v_conn.set("Disconnect")
+        self.v_conn.set("DISCONNECT")
 
     def _replay_demo(self) -> None:
-        if self._ingest is not None:
-            self._disconnect_live()
-        self.v_hud.set("building demo…")
+        if self._mode != "live":
+            self.v_mode.set("live")
+            self._on_mode()
+        self._disconnect_live()
+        self.v_badge.set("BUILDING DEMO…")
         self._run_bg(self._demo_worker)
 
     def _start_replay(self, log: LogData) -> None:
@@ -1370,7 +1643,8 @@ class TelemetryView(BaseView):
         ing.start()
         self._ingest = ing
         self._math_cache = None
-        self.v_conn.set("Disconnect")
+        self.v_conn.set("DISCONNECT")
+        self.v_badge.set("DEMO REPLAY (loop)")
 
     def _disconnect_live(self) -> None:
         ing, self._ingest = self._ingest, None
@@ -1378,31 +1652,40 @@ class TelemetryView(BaseView):
             ing.stop()
             ing.join(timeout=1.0)
         try:
-            self.v_conn.set("Connect")
+            self.v_conn.set("CONNECT")
         except tk.TclError:
             pass
 
     def _update_hud(self) -> None:
         ing = self._ingest
+        cv = self._fill_cv
+        cv.delete("all")
         if ing is None:
-            self.v_hud.set("— Hz · 0 frames · 0 dropped")
-            self.v_fill.set(0.0)
-            self.v_s_rate.set("packets: — Hz")
-            self.v_s_fill.set("buffer: —")
-        else:
-            s = ing.stats()
-            self.v_hud.set(f"{s['hz']:5.0f} Hz · {s['frames']} frames · {s['dropped']} dropped"
-                           + (" · ERR" if s.get("error") else ""))
-            self.v_fill.set(100.0 * s["fill"])
-            self.v_s_rate.set(f"packets: {s['hz']:.0f} Hz" + ("" if s["connected"] else " (down)"))
-            self.v_s_fill.set(f"buffer: {100.0 * s['fill']:.1f} %")
-            if s.get("error"):
-                self._post_status(f"Live ingest error: {s['error']}")
-        self.v_s_log.set(f"Log: {self._log_name if self._mode == 'offline' else 'LIVE'}")
-        self.v_s_fs.set(f"fs: {self._fs:.0f} Hz")
+            self.v_rate.set("OFFLINE" if self._mode == "offline" else "NO LINK")
+            self._lbl_rate.configure(fg=K_DIM if self._mode == "offline" else RED)
+            self.v_frames.set("FRM 0")
+            self.v_drop.set("DROP 0")
+            self.v_s_buf.set("BUF —")
+            self.v_s_hz.set(f"FS {self._fs:.0f} Hz")
+            self.v_s_loss.set("LOSS 0")
+            return
+        s = ing.stats()
+        hz = float(s["hz"])
+        self._lbl_rate.configure(fg=RED if not s["connected"] else GREEN if hz >= 180.0 else AMBER)
+        self.v_rate.set(f"{hz:5.0f} Hz")
+        self.v_frames.set(f"FRM {s['frames']}")
+        self.v_drop.set(f"DROP {s['dropped']}")
+        fill = float(s["fill"])
+        cv.create_rectangle(0, 0, int(80 * fill), 8, fill=GREEN if fill < 0.9 else AMBER, outline="")
+        self.v_s_buf.set(f"BUF {100.0 * fill:5.1f} %")
+        self.v_s_hz.set(f"FS {hz:.0f} Hz" + ("" if s["connected"] else " (down)"))
+        self.v_s_loss.set(f"LOSS {s['dropped']}")
+        self.v_s_file.set(f"SRC {self.v_src.get()}:{self.v_chan.get()}" if self._buffer is not None else "FILE —")
+        if s.get("error"):
+            self._post_status(f"Live ingest error: {s['error']}")
 
-    # ================================================================== poll loop
-    def _poll_tick(self) -> None:
+    # ================================================================== render tick
+    def _render_tick(self) -> None:
         self._poll_id = None
         if not self._active:
             return
@@ -1414,14 +1697,20 @@ class TelemetryView(BaseView):
             else:
                 self._tick_live()
             self._tick_n += 1
+            if self._tick_n % 8 == 0:
+                self._flash = not self._flash
+                if not self._playing and self._mode == "offline":
+                    pw = self._val("battery_power_kw", self._ci)
+                    if np.isfinite(pw) and pw > POWER_LIMIT_KW:
+                        self._update_cursor()
             if self._tick_n % 15 == 0:
                 self._update_hud()
                 self._app_state.set("last_draw_ms", self._last_ms)
         except Exception:  # noqa: BLE001  # the loop must survive any rendering error
-            LOG.exception("telemetry poll tick failed")
+            LOG.exception("telemetry render tick failed")
         self._last_ms = 1e3 * (time.perf_counter() - t0)
         if self._active and self._poll_id is None:
-            self._poll_id = self.after(POLL_MS, self._poll_tick)
+            self._poll_id = self.after(POLL_MS, self._render_tick)
 
     def _tick_playback(self) -> None:
         if not self._playing or self._t.size == 0:
@@ -1469,11 +1758,13 @@ class TelemetryView(BaseView):
         if self._live_n % 3 == 0:
             self._busy = True
             try:
-                self._axl[0].set_xlim(float(t[-1]) - win, float(t[-1]))
+                for a in self._axl:
+                    a.set_xlim(float(t[-1]) - win, float(t[-1]))
             finally:
                 self._busy = False
             self._refresh_strips()
-            self._cv_st.draw_idle()
+            for cv in self._cvs:
+                cv.draw_idle()
         if self._live_n % 15 == 0:
             self._update_map()
             self._update_gg()
@@ -1481,7 +1772,6 @@ class TelemetryView(BaseView):
             self._update_diag_extremes()
             self._cv_map.draw_idle()
             self._cv_gg.draw_idle()
-            self._cv_h.draw_idle()
         self._update_cursor()
 
 

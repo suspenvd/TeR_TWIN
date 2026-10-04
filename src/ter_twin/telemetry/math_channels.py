@@ -195,8 +195,16 @@ def compute_math_channels(t: np.ndarray, ch: dict[str, np.ndarray], vp: Any = No
     if not have_dyn:
         return out
 
-    ax_ms, ay_ms = fill_nan(ch["ax"]) * G, fill_nan(ch["ay"]) * G
-    r = np.radians(fill_nan(ch["yaw_rate"]))
+    # ---- corrección de polaridad IMU (ISO 8855: giro a izquierdas r>0 -> ay>0)
+    ay_raw = fill_nan(ch["ay"])
+    r_deg = fill_nan(ch["yaw_rate"])
+    
+    # Si la aceleración lateral y el guiño tienen signos opuestos durante el giro, invertir ay
+    ay_sign_flip = -1.0 if np.nanmedian(ay_raw * r_deg) < 0 else 1.0
+    ay_ms = ay_raw * ay_sign_flip * G
+    ax_ms = fill_nan(ch["ax"]) * G
+
+    r = np.radians(r_deg)
     vy = lfilter([0.0, dt], [1.0, -(1.0 - dt / vy_tau)], ay_ms - r * vx)
     out["vy_est"] = vy
 
@@ -240,8 +248,19 @@ def compute_math_channels(t: np.ndarray, ch: dict[str, np.ndarray], vp: Any = No
     for i, cn in enumerate(CORNERS):
         out[f"fz_{cn}"] = fz[i]
 
-    # ---- slips ---------------------------------------------------------------------------------------
-    delta = np.radians(fill_nan(ch["steer_angle"])) / vp.steer.steer_ratio if "steer_angle" in ch else np.zeros(n)
+    # ---- slips & observador de dirección cuando el sensor físico está averiado ----------------------
+    raw_steer = fill_nan(ch["steer_angle"]) if "steer_angle" in ch else np.zeros(n)
+    
+    # Si el sensor está congelado (std < 0.1) o en falla continua (30 deg fijo)
+    if np.nanstd(raw_steer) < 0.1:
+        # Reconstrucción cinemática Ackermann: delta = (r * L) / vx
+        delta = np.where(vx > 2.0, (r * c.wheelbase) / np.maximum(vx, 2.0), 0.0)
+    else:
+        if np.nanpercentile(np.abs(raw_steer), 95) <= 35.0:
+            delta = np.radians(raw_steer)
+        else:
+            delta = np.radians(raw_steer) / vp.steer.steer_ratio
+
     k = vp.steer.ackermann * c.track_f / (2.0 * c.wheelbase)
     dd = k * delta * np.sqrt(delta * delta + 1e-8)
     steer = np.vstack([delta + dd, delta - dd, np.zeros(n), np.zeros(n)])
@@ -252,12 +271,6 @@ def compute_math_channels(t: np.ndarray, ch: dict[str, np.ndarray], vp: Any = No
     alpha = -np.arctan2(vyw, np.sqrt(vxw ** 2 + V_EPS ** 2))
     for i, cn in enumerate(CORNERS):
         out[f"slip_angle_{cn}"] = np.degrees(alpha[i])
-    ws = _stack(ch, "wheel_speed_{}")
-    kappa = None
-    if ws is not None:
-        kappa = (ws / 3.6 - vxw) / np.maximum(np.abs(vxw), V_EPS)
-        for i, cn in enumerate(CORNERS):
-            out[f"slip_ratio_{cn}"] = 100.0 * kappa[i]
 
     # ---- tyre model: utilisation, TV moment ------------------------------------------------------------
     mf = _mf()

@@ -7,8 +7,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 
-from .parameters import SIDE, VehicleParams
-
+from ter_twin.models.vehicle.parameters import SIDE, VehicleParams
 
 def rack_to_delta(vp: VehicleParams, x_rack):
     """Rack travel [m] -> mean road-wheel steer angle [rad] (cubic nonlinearity optional)."""

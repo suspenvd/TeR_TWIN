@@ -457,7 +457,8 @@ class CorrelationView(BaseView):
             front, rear = self._app_state.get("front_tyre_params"), self._app_state.get("rear_tyre_params")
             vp = build_vehicle(self._app_state)
             ch = {**log.channels, **compute_math_channels(log.t, log.channels, vp, front, rear)}
-            out = correlate(log.t, ch, vp, front, rear)
+            from ter_twin.correlation import correlate_for_view
+            out = correlate_for_view(log.t, ch, vp, front, rear)
             out["name"] = "DEMO (sintético)" if path is None else path.name
             self._q.put(("veh", out))
         except Exception as exc:  # noqa: BLE001

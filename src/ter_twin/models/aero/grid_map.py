@@ -10,8 +10,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from .parameters import AeroParams
-
+from ter_twin.models.vehicle.parameters import AeroParams
 
 class AeroOut(NamedTuple):
     df_f: object      # front downforce (positive = pushes car down) [N]

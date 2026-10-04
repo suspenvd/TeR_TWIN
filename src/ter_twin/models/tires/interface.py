@@ -14,7 +14,7 @@ import jax.numpy as jnp
 
 from ter_twin.models.tires import pacejka_61 as mf
 
-from .parameters import VehicleParams
+from ter_twin.models.vehicle.parameters import VehicleParams
 
 V_EPS = 0.5  # low-speed regularisation of the slip denominators [m/s]
 

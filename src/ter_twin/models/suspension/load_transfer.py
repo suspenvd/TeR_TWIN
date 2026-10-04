@@ -16,8 +16,8 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from .aerodynamics import AeroOut, aero_forces
-from .parameters import G, VehicleParams
+from ter_twin.models.aero.grid_map import AeroOut, aero_forces
+from ter_twin.models.vehicle.parameters import G, VehicleParams
 
 
 class LoadState(NamedTuple):
